@@ -21,7 +21,7 @@ _deps/
 *.user.*
 .qmlls.ini
 *.autosave
-
+.qtcreator
 # WebAssembly artifacts
 *.wasm
 qtloader.js
@@ -91,4 +91,10 @@ config.json
 **/ssl/
 SirenConsole/webfiles/ssl/
 
+# dotnet stuff
 .fake
+.paket
+obj
+bin
+SirenManager/backend/fsharpwebserver/bin
+SirenManager/backend/fsharpwebserver/obj

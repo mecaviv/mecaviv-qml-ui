@@ -1,0 +1,11 @@
+source https://api.nuget.org/v3/index.json
+
+storage: none
+
+nuget FSharp.Core redirects: force
+nuget FSharp.Data
+nuget Giraffe
+nuget Serilog.Extensions.Logging
+nuget Serilog.Sinks.Console
+nuget SSH.NET
+nuget UnMango.CliWrap.FSharp

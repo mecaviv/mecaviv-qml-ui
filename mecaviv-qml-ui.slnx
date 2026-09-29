@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/SirenManager/" />
+  <Folder Name="/SirenManager/backend/" />
+  <Folder Name="/SirenManager/backend/fsharpwebserver/">
+    <Project Path="SirenManager/backend/fsharpwebserver/SirenManager.Backend.fsproj" />
+  </Folder>
+</Solution>
