@@ -5,3 +5,7 @@
 	path = SirenePupitre/firmware/nidmi
 	url = https://github.com/patricecolet/NiDMI.git
 	branch = feat/usb-net
+[submodule "SirenePupitre/firmware/nidmi-core"]
+	path = SirenePupitre/firmware/nidmi-core
+	url = https://github.com/patricecolet/nidmi-core.git
+	branch = feat/usb-ncm-spike
