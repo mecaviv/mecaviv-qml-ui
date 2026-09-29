@@ -40,6 +40,7 @@ qtlogo.svg
 # Logs
 *.log
 logs/
+!SirenConsole/QML/components/logs/
 
 # OS
 .DS_Store
