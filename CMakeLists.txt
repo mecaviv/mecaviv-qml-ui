@@ -14,7 +14,10 @@ option(BUILD_SIRENCONSOLE "Build SirenConsole (Console de contrôle)" ON)
 option(BUILD_PEDALIER "Build pedalierSirenium (Interface pédalier 3D)" ON)
 option(BUILD_SIRENMANAGER "Build SirenManager (Contrôle des sirènes)" ON)
 option(BUILD_FOR_WASM "Build for WebAssembly" OFF)
-option(INSTALL_NODE_DEPS "Install Node.js dependencies for sirenRouter" ON)
+# Off by default. sirenRouter is a Node service, not a Qt application, and it
+# has no package.json. Leaving this on used to attach an ALL custom target that
+# ran `npm install` on every Qt Creator build and failed the QML applications.
+option(INSTALL_NODE_DEPS "Install Node.js dependencies for sirenRouter (opt-in, not part of the application build)" OFF)
 option(COPY_TO_WEBFILES "Copy built files to webfiles/ directories" ON)
 
 # ============================================================================
@@ -74,24 +77,26 @@ if(BUILD_SIRENMANAGER)
 endif()
 
 # ============================================================================
-# sirenRouter (Node.js)
+# sirenRouter (Node.js) — never part of the default "all" target
 # ============================================================================
+# Qt Creator builds "all". An ALL custom target with no output is always out of
+# date, so every application build used to run `npm install` here and stop when
+# sirenRouter/package.json was missing. The QML apps do not depend on it.
 
 if(INSTALL_NODE_DEPS)
-    # Vérifier si npm est disponible
     find_program(NPM_EXECUTABLE npm)
-    
-    if(NPM_EXECUTABLE)
-        add_custom_target(sirenRouter ALL
+    if(NPM_EXECUTABLE AND EXISTS "${CMAKE_SOURCE_DIR}/sirenRouter/package.json")
+        add_custom_target(sirenRouter
             COMMAND ${NPM_EXECUTABLE} install
             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/sirenRouter
             COMMENT "Installing Node.js dependencies for sirenRouter..."
         )
-        message(STATUS "sirenRouter will be configured with npm install")
+        message(STATUS "sirenRouter: optional target only (cmake --build <dir> --target sirenRouter)")
     else()
-        message(WARNING "npm not found - sirenRouter dependencies won't be installed")
-        message(WARNING "Install Node.js and npm to enable sirenRouter build")
+        message(STATUS "sirenRouter: not configured (npm or sirenRouter/package.json missing)")
     endif()
+else()
+    message(STATUS "sirenRouter: skipped (INSTALL_NODE_DEPS=OFF)")
 endif()
 
 # ============================================================================
@@ -101,7 +106,7 @@ endif()
 # Target pour nettoyer tout
 add_custom_target(clean_all
     COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_BINARY_DIR}
-    COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_SOURCE_DIR}/SirenePupitre/build
+#   COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_SOURCE_DIR}/SirenePupitre/build
     COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_SOURCE_DIR}/SirenConsole/build
     COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_SOURCE_DIR}/pedalierSirenium/QtFiles/build
     COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_SOURCE_DIR}/SirenManager/build

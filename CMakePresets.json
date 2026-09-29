@@ -19,7 +19,7 @@
         "BUILD_SIRENCONSOLE": true,
         "BUILD_PEDALIER": true,
         "BUILD_SIRENMANAGER": true,
-        "INSTALL_NODE_DEPS": true,
+        "INSTALL_NODE_DEPS": false,
         "CMAKE_PREFIX_PATH": "$env{QT_DIR}"
       }
     },
@@ -45,7 +45,7 @@
         "BUILD_SIRENCONSOLE": true,
         "BUILD_PEDALIER": true,
         "BUILD_SIRENMANAGER": true,
-        "INSTALL_NODE_DEPS": true,
+        "INSTALL_NODE_DEPS": false,
         "CMAKE_PREFIX_PATH": "$env{QT_WASM_DIR}",
         "CMAKE_TOOLCHAIN_FILE": "$env{QT_WASM_DIR}/lib/cmake/Qt6/qt.toolchain.cmake"
       },
