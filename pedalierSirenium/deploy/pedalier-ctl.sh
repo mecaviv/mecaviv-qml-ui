@@ -148,7 +148,7 @@ phase_preflight() {
         blocking=1
     fi
 
-    if timeout 15 git ls-remote https://github.com/patricecolet/mecaviv-qml-ui.git HEAD >/dev/null 2>&1; then
+    if timeout 15 git ls-remote https://github.com/mecaviv/mecaviv-qml-ui.git HEAD >/dev/null 2>&1; then
         ok "accès à GitHub (https)"
     else
         err "GitHub injoignable en https"

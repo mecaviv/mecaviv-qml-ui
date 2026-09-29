@@ -1177,7 +1177,7 @@ Pour lancer automatiquement SirenePupitre au démarrage du Raspberry Pi, utilise
 1. **Cloner le repository sur le Raspberry Pi**
 ```bash
 cd /home/sirenateur/dev/src/mecaviv
-git clone https://github.com/patricecolet/mecaviv-qml-ui.git
+git clone https://github.com/mecaviv/mecaviv-qml-ui.git
 cd mecaviv-qml-ui/SirenePupitre
 ```
 

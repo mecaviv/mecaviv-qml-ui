@@ -187,7 +187,7 @@ $env:QT_WASM_DIR = "C:\Qt\6.10.0\wasm_singlethread"
 
 ```bash
 # Cloner le dépôt
-git clone https://github.com/patricecolet/mecaviv-qml-ui.git
+git clone https://github.com/mecaviv/mecaviv-qml-ui.git
 cd mecaviv-qml-ui
 
 # Configurer les variables Qt (voir CONFIG.md)

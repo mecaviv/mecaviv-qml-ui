@@ -1,6 +1,6 @@
 # Dépôts clonés sur le Pi : <url> <chemin relatif à $HOME> <branche>
 # Mis à jour par `git fetch` + `git merge --ff-only` — jamais de merge automatique.
 
-https://github.com/patricecolet/mecaviv-qml-ui.git   dev/src/mecaviv-qml-ui                 main
+https://github.com/mecaviv/mecaviv-qml-ui.git   dev/src/mecaviv-qml-ui                 main
 git@github.com:mecaviv/puredata-abstractions.git     dev/src/mecaviv/puredata-abstractions  main
 git@github.com:patricecolet/critapec-pd-externals.git pd-externals/critapec                 feature/pdjson-setB
