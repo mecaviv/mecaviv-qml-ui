@@ -1,0 +1,7 @@
+[submodule "mecaviv-rs"]
+	path = mecaviv-rs
+	url = https://github.com/mecaviv/mecaviv-rs.git
+[submodule "SirenePupitre/firmware/nidmi"]
+	path = SirenePupitre/firmware/nidmi
+	url = https://github.com/patricecolet/NiDMI.git
+	branch = feat/usb-net

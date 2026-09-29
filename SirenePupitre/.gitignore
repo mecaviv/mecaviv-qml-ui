@@ -80,3 +80,6 @@ CMakeLists.txt.user*
 .rcc/
 .uic/
 /build*/
+
+# Firmware NiDMI : binaires compiles depuis le sous-module firmware/nidmi
+firmware/bin/*.bin
