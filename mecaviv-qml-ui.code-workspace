@@ -4,10 +4,10 @@
             "path": "."
         },
         {
-            "path": "../mecaviv/firmwares-artila/ClicRaspberry"
+            "path": "../firmwares-artila/ClicRaspberry"
         },
         {
-            "path": "../mecaviv/compositions"
+            "path": "../compositions"
         },
         {
             "path": "../ComposeSiren-fixed"

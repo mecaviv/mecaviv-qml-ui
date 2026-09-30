@@ -93,3 +93,7 @@ config.json
 SirenConsole/webfiles/ssl/
 
 .fake
+# KiCad : fichiers locaux de session
+*.kicad_prl
+fp-info-cache
+*-backups/
