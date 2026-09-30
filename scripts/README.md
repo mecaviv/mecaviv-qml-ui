@@ -278,6 +278,14 @@ node --version  # Vérifier la version
 npm --version
 ```
 
+### .NET SDK
+
+**Version requise** : SDK 10. La configuration CMake exécute `dotnet tool restore` et, si `dotnet paket` répond, `dotnet paket restore`. Les projets sont listés dans le README, section Serveurs .NET.
+
+```bash
+dotnet --version
+```
+
 ### Emscripten (pour Qt WebAssembly)
 
 Qt WebAssembly nécessite Emscripten. Normalement installé avec Qt.

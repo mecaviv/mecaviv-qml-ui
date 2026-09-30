@@ -37,19 +37,21 @@ cmake --build build --target appSirenManager --parallel
 
 The CMake file disables `Qt6Quick3D`, `Qt6Graphs`, and `Qt6VirtualKeyboard` — this app is intentionally 2D-only (unlike `SirenePupitre`/`pedalierSirenium`). Don't add Quick3D imports here; they will fail under WASM.
 
-## Backend (Node.js SSH + UDP proxy)
+## Backend (F# SSH + UDP proxy)
 
-The C++/QML app cannot speak SSH or raw UDP from the browser, so `backend/server.js` provides:
+The C++/QML app cannot speak SSH or raw UDP from the browser, so `backend/fsharpwebserver` provides the contract in `backend/NODE_CODEBASE.md` (`backend/server.js` is the Node original):
 
 - **HTTP REST on 8005** — `/api/ssh/{execute,download,upload}` for system maintenance (reads `backend/config.json` for per-machine IPs and SSH key paths).
 - **WebSocket on 8006** — bidirectional UDP proxy. Browser sends `{type:"udp_send", address, port, data:<hex>}`; server forwards on UDP socket and broadcasts received UDP packets back as `{type:"udp_receive", ...}`.
 - **UDP on 4443** — local socket bound by the proxy.
 
 ```bash
-cd backend && npm install && node server.js
+# from mecaviv-qml-ui
+dotnet watch --non-interactive --project SirenManager/backend/fsharpwebserver
+dotnet run --project SirenManager/backend/fsharpwebserver
 ```
 
-SSH delegates entirely to the user's `~/.ssh/config` via the system `ssh` / `scp` binaries (spawned by `ssh-proxy.js`) — the backend does NOT load private keys itself. This keeps key/port/user/algorithm decisions in one place: the user's existing SSH config. Each machine entry in `backend/config.json` may set an optional `sshAlias` to target a `Host <alias>` block; otherwise the backend falls back to `<sshUser>@<ip>`. The `sshKeyPath` field in older configs is now ignored.
+SSH delegates entirely to the user's `~/.ssh/config` via the system `ssh` binary (CliWrap in `SshProxy.fs`, same argv as `ssh-proxy.js`). The backend does NOT load private keys itself. This keeps key/port/user/algorithm decisions in one place: the user's existing SSH config. Each machine entry in `backend/config.json` may set an optional `sshAlias` to target a `Host <alias>` block; otherwise the backend falls back to `<sshUser>@<ip>`. The `sshKeyPath` field in older configs is now ignored.
 
 Uploads pipe content through `ssh host 'cat > remotePath'` rather than scp, because the busybox-based sirens often lack scp (matches the legacy SireneControlMac approach).
 

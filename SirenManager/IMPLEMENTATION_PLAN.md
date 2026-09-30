@@ -6,6 +6,7 @@
 - ✅ Configuration (SirenConfig, MachineType)
 - ✅ UdpController (structure de base)
 - ✅ Backend Node.js (server.js, ssh-proxy.js)
+- ✅ Backend F# (`SirenManager/backend/fsharpwebserver`) — même contrat ; c'est le processus à lancer
 
 ## À implémenter
 
