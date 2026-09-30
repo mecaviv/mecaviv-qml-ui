@@ -502,6 +502,11 @@ Rectangle {
                 Item { Layout.fillWidth: true }
 
                 Button {
+                    text: "Lister playlists + MIDI"
+                    Layout.preferredHeight: 32
+                    onClicked: { listPlaylists(); listAllMidi() }
+                }
+                Button {
                     text: "Exporter clés SSH"
                     Layout.preferredHeight: 32
                     onClicked: exportKeysDialog.open()
@@ -522,7 +527,7 @@ Rectangle {
         // ==================== SYSTEM INFO ====================
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 84 + (trackCpu.checked ? 130 : 0) + (diskDetailArea.text.length > 0 ? 230 : 0)
+            Layout.preferredHeight: 84 + 170
             color: "#2a2a2a"; border.color: "#444"; radius: 4
 
             ColumnLayout {
@@ -533,16 +538,6 @@ Rectangle {
                 RowLayout {
                     Label { text: "ÉTAT SYSTÈME"; color: "#888"; font.pixelSize: 11; font.bold: true }
                     Item { Layout.fillWidth: true }
-                    CheckBox {
-                        id: trackCpu
-                        text: "Suivre le CPU"
-                        onCheckedChanged: root.resetCpuTrack()
-                    }
-                    Button {
-                        text: "Détail disque"
-                        Layout.preferredHeight: 26
-                        onClicked: root.requestDiskDetail()
-                    }
                     Button {
                         text: "Rafraîchir"
                         Layout.preferredHeight: 26
@@ -552,80 +547,143 @@ Rectangle {
                 TextEdit { id: ramLabel;  text: "—"; color: "white"; font.pixelSize: 14; font.family: "Menlo"; readOnly: true; selectByMouse: true; wrapMode: TextEdit.Wrap; Layout.fillWidth: true }
                 TextEdit { id: diskLabel; text: "";  color: "white"; font.pixelSize: 14; font.family: "Menlo"; readOnly: true; selectByMouse: true; wrapMode: TextEdit.Wrap; Layout.fillWidth: true }
 
-                ScrollView {
-                    visible: diskDetailArea.text.length > 0
+                // CPU plot and disk breakdown side by side, both resizable.
+                StyledSplitView {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 220
-                    TextArea {
-                        id: diskDetailArea
-                        readOnly: true
-                        color: "#ccc"
-                        font.family: "Menlo"
-                        font.pixelSize: 12
-                        wrapMode: TextEdit.NoWrap
-                        background: Rectangle { color: "#111" }
+                    Layout.fillHeight: true
+                    orientation: Qt.Horizontal
+
+                // CPU history, as Activity Monitor draws it: 0-100 % against
+                // time, newest on the right, a filled area under the line. The
+                // plot takes the whole pane; the reading and the box float over
+                // its top right corner.
+                Rectangle {
+                    SplitView.fillWidth: true
+                    SplitView.minimumWidth: 200
+                    color: "#111"; border.color: "#444"
+
+                    Canvas {
+                        id: cpuCanvas
+                        anchors.fill: parent
+                        onWidthChanged: requestPaint()
+                        onHeightChanged: requestPaint()
+                        onPaint: {
+                            var ctx = getContext("2d")
+                            var w = width, h = height
+                            ctx.reset()
+                            ctx.fillStyle = "#111"
+                            ctx.fillRect(0, 0, w, h)
+                            ctx.strokeStyle = "#333"
+                            ctx.lineWidth = 1
+                            ctx.beginPath()
+                            for (var g = 1; g < 4; g++) {          // 25, 50, 75 %
+                                var gy = Math.round(h * g / 4) + 0.5
+                                ctx.moveTo(0, gy); ctx.lineTo(w, gy)
+                            }
+                            ctx.stroke()
+                            var data = root.cpuSamples
+                            if (data.length < 2) return
+                            var step = w / (root.cpuHistory - 1)
+                            var x0 = w - (data.length - 1) * step
+                            function y(v) { return h - (v / 100) * (h - 2) - 1 }
+                            ctx.beginPath()
+                            ctx.moveTo(x0, h)
+                            for (var i = 0; i < data.length; i++) ctx.lineTo(x0 + i * step, y(data[i]))
+                            ctx.lineTo(w, h)
+                            ctx.closePath()
+                            ctx.fillStyle = "rgba(90, 200, 120, 0.30)"
+                            ctx.fill()
+                            ctx.beginPath()
+                            for (var j = 0; j < data.length; j++) {
+                                if (j === 0) ctx.moveTo(x0, y(data[0]))
+                                else ctx.lineTo(x0 + j * step, y(data[j]))
+                            }
+                            ctx.strokeStyle = "#5ac878"
+                            ctx.lineWidth = 1.5
+                            ctx.stroke()
+                        }
+                    }
+
+                    Rectangle {
+                        anchors.top: parent.top
+                        anchors.right: parent.right
+                        anchors.topMargin: 4
+                        anchors.rightMargin: 4
+                        width: cpuControls.implicitWidth + 12
+                        height: cpuControls.implicitHeight + 6
+                        radius: 5
+                        color: "#d92a2a2a"; border.color: "#555"
+
+                        RowLayout {
+                            id: cpuControls
+                            anchors.centerIn: parent
+                            spacing: 8
+                            Label {
+                                text: !trackCpu.checked ? "CPU"
+                                      : root.cpuSamples.length > 0
+                                        ? "CPU " + root.cpuSamples[root.cpuSamples.length - 1].toFixed(0) + " %"
+                                        : "CPU …"
+                                color: "white"; font.pixelSize: 12; font.family: "Menlo"; font.bold: true
+                            }
+                            Label {
+                                visible: trackCpu.checked && root.cpuLoad.length > 0
+                                text: "charge " + root.cpuLoad
+                                color: "#888"; font.pixelSize: 11; font.family: "Menlo"
+                            }
+                            CheckBox {
+                                id: trackCpu
+                                text: "Suivre"
+                                Layout.preferredHeight: 24
+                                padding: 0
+                                onCheckedChanged: root.resetCpuTrack()
+                            }
+                        }
                     }
                 }
 
-                // CPU history, as Activity Monitor draws it: 0-100 % against
-                // time, newest on the right, a filled area under the line.
-                RowLayout {
-                    visible: trackCpu.checked
-                    Layout.fillWidth: true
-                    Label {
-                        text: root.cpuSamples.length > 0
-                              ? "CPU " + root.cpuSamples[root.cpuSamples.length - 1].toFixed(0) + " %"
-                              : "CPU …"
-                        color: "white"; font.pixelSize: 14; font.family: "Menlo"
+                Rectangle {
+                    SplitView.preferredWidth: 440
+                    SplitView.minimumWidth: 200
+                    color: "#111"; border.color: "#444"
+
+                    ScrollView {
+                        anchors.fill: parent
+                        TextArea {
+                            id: diskDetailArea
+                            readOnly: true
+                            color: "#ccc"
+                            font.family: "Menlo"
+                            font.pixelSize: 12
+                            wrapMode: TextEdit.NoWrap
+                            leftPadding: 6; topPadding: 4; rightPadding: 6; bottomPadding: 4
+                            placeholderText: "Détail disque: MIDI, playlists, binaires"
+                            background: null
+                        }
                     }
-                    Label {
-                        text: root.cpuLoad.length > 0 ? "charge " + root.cpuLoad : ""
-                        color: "#888"; font.pixelSize: 12; font.family: "Menlo"
+
+                    Rectangle {
+                        anchors.top: parent.top
+                        anchors.right: parent.right
+                        anchors.topMargin: 4
+                        anchors.rightMargin: 16
+                        width: diskControls.implicitWidth + 12
+                        height: diskControls.implicitHeight + 6
+                        radius: 5
+                        color: "#d92a2a2a"; border.color: "#555"
+
+                        RowLayout {
+                            id: diskControls
+                            anchors.centerIn: parent
+                            spacing: 8
+                            Label { text: "DISQUE"; color: "#888"; font.pixelSize: 11; font.bold: true }
+                            Button {
+                                text: "Détail disque"
+                                Layout.preferredHeight: 24
+                                onClicked: root.requestDiskDetail()
+                            }
+                        }
                     }
                 }
-                Canvas {
-                    id: cpuCanvas
-                    visible: trackCpu.checked
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    Layout.minimumHeight: 60
-                    onWidthChanged: requestPaint()
-                    onHeightChanged: requestPaint()
-                    onPaint: {
-                        var ctx = getContext("2d")
-                        var w = width, h = height
-                        ctx.reset()
-                        ctx.fillStyle = "#111"
-                        ctx.fillRect(0, 0, w, h)
-                        ctx.strokeStyle = "#333"
-                        ctx.lineWidth = 1
-                        ctx.beginPath()
-                        for (var g = 1; g < 4; g++) {          // 25, 50, 75 %
-                            var gy = Math.round(h * g / 4) + 0.5
-                            ctx.moveTo(0, gy); ctx.lineTo(w, gy)
-                        }
-                        ctx.stroke()
-                        var data = root.cpuSamples
-                        if (data.length < 2) return
-                        var step = w / (root.cpuHistory - 1)
-                        var x0 = w - (data.length - 1) * step
-                        function y(v) { return h - (v / 100) * (h - 2) - 1 }
-                        ctx.beginPath()
-                        ctx.moveTo(x0, h)
-                        for (var i = 0; i < data.length; i++) ctx.lineTo(x0 + i * step, y(data[i]))
-                        ctx.lineTo(w, h)
-                        ctx.closePath()
-                        ctx.fillStyle = "rgba(90, 200, 120, 0.30)"
-                        ctx.fill()
-                        ctx.beginPath()
-                        for (var j = 0; j < data.length; j++) {
-                            if (j === 0) ctx.moveTo(x0, y(data[0]))
-                            else ctx.lineTo(x0 + j * step, y(data[j]))
-                        }
-                        ctx.strokeStyle = "#5ac878"
-                        ctx.lineWidth = 1.5
-                        ctx.stroke()
-                    }
                 }
             }
         }
@@ -693,10 +751,16 @@ Rectangle {
             }
         }
 
+        // ==================== PLAYLISTS | MIDI, side by side ====================
+        StyledSplitView {
+            SplitView.preferredHeight: 240
+            SplitView.minimumHeight: 70
+            orientation: Qt.Horizontal
+
         // ==================== PLAYLISTS ====================
         Rectangle {
-            SplitView.preferredHeight: 180
-            SplitView.minimumHeight: 70
+            SplitView.preferredWidth: 280
+            SplitView.minimumWidth: 140
             color: "#2a2a2a"; border.color: "#444"
 
             ColumnLayout {
@@ -708,7 +772,6 @@ Rectangle {
                     Label { text: "PLAYLISTS DISTANTES"; color: "#888"; font.pixelSize: 11; font.bold: true }
                     Item { Layout.fillWidth: true }
                     Label { id: playlistStatus; text: ""; color: "#777"; font.pixelSize: 10 }
-                    Button { text: "Lister"; Layout.preferredHeight: 26; onClicked: listPlaylists() }
                 }
 
                 ScrollView {
@@ -737,8 +800,8 @@ Rectangle {
 
         // ==================== MIDI DISTANTS ====================
         Rectangle {
-            SplitView.preferredHeight: 240
-            SplitView.minimumHeight: 70
+            SplitView.fillWidth: true
+            SplitView.minimumWidth: 200
             color: "#2a2a2a"; border.color: "#444"
 
             ColumnLayout {
@@ -750,11 +813,6 @@ Rectangle {
                     Label { text: "MIDI DISTANTS"; color: "#888"; font.pixelSize: 11; font.bold: true }
                     Item { Layout.fillWidth: true }
                     Label { id: midiStatus; text: ""; color: "#777"; font.pixelSize: 10 }
-                    Button {
-                        text: "Lister tout"
-                        Layout.preferredHeight: 26
-                        onClicked: listAllMidi()
-                    }
                 }
 
                 ScrollView {
@@ -773,7 +831,8 @@ Rectangle {
                 }
             }
         }
-        } // SplitView (DMESG / PLAYLISTS / MIDI)
+        } // StyledSplitView (PLAYLISTS | MIDI)
+        } // StyledSplitView (DMESG / PLAYLISTS + MIDI)
     }
 
     // ==================== EXPORT KEYS ARCHIVE ====================
