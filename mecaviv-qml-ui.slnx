@@ -1,7 +1,25 @@
 <Solution>
+  <Folder Name="/Infrastructure/">
+    <Project Path="Infrastructure/Infrastructure.fsproj" />
+  </Folder>
   <Folder Name="/SirenManager/" />
   <Folder Name="/SirenManager/backend/" />
   <Folder Name="/SirenManager/backend/fsharpwebserver/">
     <Project Path="SirenManager/backend/fsharpwebserver/SirenManager.Backend.fsproj" />
+  </Folder>
+  <Folder Name="/SirenManager/webfiles/">
+    <Project Path="SirenManager/webfiles/SirenManager.Web.fsproj" />
+  </Folder>
+  <Folder Name="/SirenePupitre/">
+    <Project Path="SirenePupitre/webfiles/SirenePupitre.Web.fsproj" />
+  </Folder>
+  <Folder Name="/SirenConsole/">
+    <Project Path="SirenConsole/webfiles/SirenConsole.Web.fsproj" />
+  </Folder>
+  <Folder Name="/pedalierSirenium/">
+    <Project Path="pedalierSirenium/webfiles/PedalierSirenium.Web.fsproj" />
+  </Folder>
+  <Folder Name="/sirenRouter/">
+    <Project Path="sirenRouter/SirenRouter.fsproj" />
   </Folder>
 </Solution>

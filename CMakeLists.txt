@@ -43,6 +43,140 @@ message(STATUS "sirenRouter (Node.js): ${INSTALL_NODE_DEPS}")
 message(STATUS "============================================")
 
 # ============================================================================
+# Outils .NET (configure time)
+# ============================================================================
+# CMake has no module for local dotnet tools or Paket. This is configure-time
+# on purpose: an ALL custom target would re-run on every Qt Creator build.
+# The repo root is this listfile's directory. An out-of-tree -B folder is not
+# a parent of paket.dependencies, and `dotnet paket` only finds the local tool
+# by walking up from the process working directory. --tool-manifest pins
+# restore to that same directory. A missing SDK or a failed probe does not
+# fail the Qt configure.
+
+get_filename_component(MECAVIV_ROOT "${CMAKE_CURRENT_LIST_DIR}" ABSOLUTE)
+set(MECAVIV_TOOL_MANIFEST "${MECAVIV_ROOT}/.config/dotnet-tools.json")
+
+# find_program caches a miss as DOTNET_EXECUTABLE-NOTFOUND and does not look
+# again. Qt Creator configures with PATH=/usr/bin:/bin:/usr/sbin:/sbin, so the
+# installer copy at /usr/local/share/dotnet/dotnet is invisible and that miss
+# sticks. Drop a missing result, then try PATH, then the installer directories.
+if(NOT EXISTS "${DOTNET_EXECUTABLE}")
+    unset(DOTNET_EXECUTABLE CACHE)
+    unset(DOTNET_EXECUTABLE)
+endif()
+find_program(DOTNET_EXECUTABLE dotnet)
+if(NOT EXISTS "${DOTNET_EXECUTABLE}")
+    foreach(_dotnet_dir IN ITEMS
+        "$ENV{DOTNET_ROOT}"
+        "/usr/local/share/dotnet"
+        "/usr/share/dotnet"
+        "$ENV{HOME}/.dotnet"
+        "$ENV{ProgramFiles}/dotnet")
+        if(_dotnet_dir AND EXISTS "${_dotnet_dir}/dotnet")
+            set(DOTNET_EXECUTABLE "${_dotnet_dir}/dotnet" CACHE FILEPATH "Path to dotnet" FORCE)
+            break()
+        elseif(_dotnet_dir AND EXISTS "${_dotnet_dir}/dotnet.exe")
+            set(DOTNET_EXECUTABLE "${_dotnet_dir}/dotnet.exe" CACHE FILEPATH "Path to dotnet" FORCE)
+            break()
+        endif()
+    endforeach()
+endif()
+
+if(EXISTS "${DOTNET_EXECUTABLE}" AND EXISTS "${MECAVIV_TOOL_MANIFEST}")
+    message(STATUS "dotnet: ${DOTNET_EXECUTABLE}")
+    execute_process(
+        COMMAND ${DOTNET_EXECUTABLE} tool restore --tool-manifest "${MECAVIV_TOOL_MANIFEST}"
+        WORKING_DIRECTORY "${MECAVIV_ROOT}"
+        RESULT_VARIABLE DOTNET_TOOL_RESTORE_RESULT
+        OUTPUT_VARIABLE DOTNET_TOOL_RESTORE_OUTPUT
+        ERROR_VARIABLE DOTNET_TOOL_RESTORE_ERROR
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_STRIP_TRAILING_WHITESPACE
+    )
+    if(NOT DOTNET_TOOL_RESTORE_RESULT EQUAL 0)
+        message(STATUS "dotnet tool restore failed (${DOTNET_TOOL_RESTORE_RESULT}) in ${MECAVIV_ROOT}; Paket restore skipped")
+        if(DOTNET_TOOL_RESTORE_ERROR)
+            message(STATUS "${DOTNET_TOOL_RESTORE_ERROR}")
+        endif()
+    else()
+        message(STATUS "dotnet tool restore done (${MECAVIV_ROOT})")
+        # `dotnet paket` resolves the local tool by walking up from the
+        # process cwd. Away from this repo it prints "command or file was
+        # not found". The dll restored into the NuGet cache still runs.
+        set(MECAVIV_PAKET_LAUNCH "${DOTNET_EXECUTABLE}" "paket")
+        execute_process(
+            COMMAND ${MECAVIV_PAKET_LAUNCH} --version
+            WORKING_DIRECTORY "${MECAVIV_ROOT}"
+            RESULT_VARIABLE DOTNET_PAKET_PROBE
+            OUTPUT_VARIABLE DOTNET_PAKET_VERSION
+            ERROR_VARIABLE DOTNET_PAKET_PROBE_ERROR
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_STRIP_TRAILING_WHITESPACE
+        )
+        set(_paket_probe_text "${DOTNET_PAKET_VERSION}\n${DOTNET_PAKET_PROBE_ERROR}")
+        if(NOT DOTNET_PAKET_PROBE EQUAL 0 OR _paket_probe_text MATCHES "[Nn]ot found")
+            file(READ "${MECAVIV_TOOL_MANIFEST}" _mecaviv_tool_manifest)
+            string(REGEX MATCH "\"paket\"[^}]*\"version\"[ \t\r\n]*:[ \t\r\n]*\"([^\"]+)\"" _mecaviv_paket_ver "${_mecaviv_tool_manifest}")
+            if(DEFINED ENV{NUGET_PACKAGES} AND NOT "$ENV{NUGET_PACKAGES}" STREQUAL "")
+                set(_nuget_packages "$ENV{NUGET_PACKAGES}")
+            elseif(WIN32 AND DEFINED ENV{USERPROFILE})
+                set(_nuget_packages "$ENV{USERPROFILE}/.nuget/packages")
+            else()
+                set(_nuget_packages "$ENV{HOME}/.nuget/packages")
+            endif()
+            file(GLOB _paket_dlls "${_nuget_packages}/paket/${CMAKE_MATCH_1}/tools/*/any/paket.dll")
+            if(_paket_dlls)
+                list(SORT _paket_dlls)
+                list(GET _paket_dlls -1 _paket_dll)
+                execute_process(
+                    COMMAND ${DOTNET_EXECUTABLE} "${_paket_dll}" --version
+                    WORKING_DIRECTORY "${MECAVIV_ROOT}"
+                    RESULT_VARIABLE DOTNET_PAKET_PROBE
+                    OUTPUT_VARIABLE DOTNET_PAKET_VERSION
+                    ERROR_VARIABLE DOTNET_PAKET_PROBE_ERROR
+                    OUTPUT_STRIP_TRAILING_WHITESPACE
+                    ERROR_STRIP_TRAILING_WHITESPACE
+                )
+                if(DOTNET_PAKET_PROBE EQUAL 0)
+                    set(MECAVIV_PAKET_LAUNCH "${DOTNET_EXECUTABLE}" "${_paket_dll}")
+                    message(STATUS "dotnet paket command was not found; using ${_paket_dll}")
+                endif()
+            endif()
+        endif()
+        if(DOTNET_PAKET_PROBE EQUAL 0)
+            message(STATUS "dotnet paket ${DOTNET_PAKET_VERSION}")
+            execute_process(
+                COMMAND ${MECAVIV_PAKET_LAUNCH} restore
+                WORKING_DIRECTORY "${MECAVIV_ROOT}"
+                RESULT_VARIABLE DOTNET_PAKET_RESTORE_RESULT
+                OUTPUT_VARIABLE DOTNET_PAKET_RESTORE_OUTPUT
+                ERROR_VARIABLE DOTNET_PAKET_RESTORE_ERROR
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                ERROR_STRIP_TRAILING_WHITESPACE
+            )
+            if(DOTNET_PAKET_RESTORE_RESULT EQUAL 0)
+                message(STATUS "dotnet paket restore done (${MECAVIV_ROOT})")
+            else()
+                message(STATUS "dotnet paket restore failed (${DOTNET_PAKET_RESTORE_RESULT}); Qt configure continues")
+                if(DOTNET_PAKET_RESTORE_ERROR)
+                    message(STATUS "${DOTNET_PAKET_RESTORE_ERROR}")
+                endif()
+                if(DOTNET_PAKET_RESTORE_OUTPUT)
+                    message(STATUS "${DOTNET_PAKET_RESTORE_OUTPUT}")
+                endif()
+            endif()
+        else()
+            message(STATUS "dotnet paket is not available; Paket restore skipped")
+            if(DOTNET_PAKET_PROBE_ERROR)
+                message(STATUS "${DOTNET_PAKET_PROBE_ERROR}")
+            endif()
+        endif()
+    endif()
+else()
+    message(STATUS "dotnet tool restore skipped (dotnet or .config/dotnet-tools.json missing)")
+endif()
+
+# ============================================================================
 # Dépendances Qt
 # ============================================================================
 find_package(Qt6 REQUIRED COMPONENTS 

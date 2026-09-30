@@ -7,7 +7,7 @@ open System.Text.RegularExpressions
 open CliWrap
 open UnMango.CliWrap.FSharp
 open SirenManager.Backend.Config
-open SirenManager.Backend.Logging
+open Mecaviv.Infrastructure.Logging
 
 exception SshError of string
 

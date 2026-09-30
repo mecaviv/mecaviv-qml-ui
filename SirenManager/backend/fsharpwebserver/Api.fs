@@ -14,7 +14,7 @@ open Microsoft.AspNetCore.Http
 open UnMango.CliWrap.FSharp
 open SirenManager.Backend
 open SirenManager.Backend.Config
-open SirenManager.Backend.Logging
+open Mecaviv.Infrastructure.Logging
 
 let tryProp (el: JsonElement) (name: string) =
   let mutable found = Unchecked.defaultof<JsonElement>

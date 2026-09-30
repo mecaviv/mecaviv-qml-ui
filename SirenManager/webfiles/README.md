@@ -9,6 +9,13 @@ npm install
 node server.js
 ```
 
+Esquisse F# du même dossier (HTTP 8081, le WebSocket 8006 reste sur le backend SSH), depuis `mecaviv-qml-ui` :
+
+```bash
+dotnet watch --non-interactive --project SirenManager/webfiles
+dotnet run --project SirenManager/webfiles
+```
+
 Puis ouvrez dans votre navigateur :
 - http://localhost:8080/appSirenManager.html
 
@@ -17,9 +24,8 @@ Puis ouvrez dans votre navigateur :
 Pour utiliser les fonctionnalités SSH (maintenance système), démarrez aussi le backend :
 
 ```bash
-cd ../backend
-npm install
-node server.js
+dotnet watch --non-interactive --project SirenManager/backend/fsharpwebserver
+dotnet run --project SirenManager/backend/fsharpwebserver
 ```
 
 Le backend écoute sur :

@@ -1,8 +1,9 @@
 # F# sketch of the SirenManager backend
 
-Same host shape as `reaper-extensibility/server`: Giraffe on Kestrel, `UseGiraffe`, `AddGiraffe`. It speaks the Node JSON contract in `../NODE_CODEBASE.md`, so `SshController` and the WebAssembly `UdpController` do not change.
+Same host shape as `reaper-extensibility/server`: Giraffe on Kestrel, `UseGiraffe`, `AddGiraffe`. Logging and the Kestrel host live in `Infrastructure/` (`Mecaviv.Infrastructure`). It speaks the Node JSON contract in `../NODE_CODEBASE.md`, so `SshController` and the WebAssembly `UdpController` do not change.
 
 ```bash
+dotnet watch --non-interactive --project SirenManager/backend/fsharpwebserver
 dotnet run --project SirenManager/backend/fsharpwebserver
 ```
 
@@ -38,6 +39,6 @@ CliWrap is the Reaper server's `command { args; stdout; exec }` shape. It does n
 
 ## What is still outside the sketch
 
-- The macOS 10.13 bundle starts `sirenmanager-backend` from `main.cpp` (`BUNDLED_BACKEND`). A `dotnet publish -c Release -r osx-x64 --self-contained` binary can take that slot. It is larger than the `pkg` Node 16 binary and needs the 10.13-era runtime story checked separately. This project targets `net9.0`, same as the Reaper server, which is not a 10.13 runtime.
+- The macOS 10.13 bundle starts `sirenmanager-backend` from `main.cpp` (`BUNDLED_BACKEND`). A `dotnet publish -c Release -r osx-x64 --self-contained` binary can take that slot. It is larger than the `pkg` Node 16 binary and needs the 10.13-era runtime story checked separately. This project targets `net10.0`, which is not a 10.13 runtime.
 - No tests. The behaviours that have already bitten the Node version are the ones to pin: BusyBox `ls` instead of `find`, dry-run must not delete, UDP 8000 stays closed with zero WebSocket clients, download is UTF-8, upload may be base64.
-- `webfiles/server.js` is unrelated and also binds port 8006. Do not port it into this process.
+- `webfiles/server.js` is a separate static server. Its project is `SirenManager/webfiles`. Port 8006 stays with this SSH process.

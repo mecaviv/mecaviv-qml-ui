@@ -117,9 +117,27 @@ Ce monorepo regroupe 4 applications interconnectées pour le contrôle, la visua
 - Dashboard web de monitoring
 - Historique et logs des activités
 
-**Technologies** : Node.js, Express, WebSocket  
-**Ports** : 8002 (API REST), 8003 (WebSocket), 8004 (UDP)  
+**Technologies** : `SirenRouter.fsproj` (HTTP 8002). Le module Node de ce dossier est `src/api/control.js`.  
+**Ports prévus** : 8002 (API REST), 8003 (WebSocket), 8004 (UDP)  
 **README** : [sirenRouter/README.md](./sirenRouter/README.md)
+
+## Serveurs .NET
+
+La configuration CMake exécute `dotnet tool restore` et, si `dotnet paket` répond, `dotnet paket restore`. Depuis cette racine :
+
+```bash
+dotnet watch --non-interactive --project <projet>
+dotnet run --project <projet>
+```
+
+| Projet | Rôle |
+|---|---|
+| `SirenManager/backend/fsharpwebserver` | API SSH / UDP, ports 8005 et 8006 |
+| `SirenManager/webfiles` | fichiers WASM, port 8081 |
+| `SirenePupitre/webfiles` | fichiers WASM, port 8000. L'API MIDI est `server.js` |
+| `SirenConsole/webfiles` | fichiers WASM, port 8001. Presets, MIDI et `/ws` sont `server.js` |
+| `pedalierSirenium/webfiles` | fichiers WASM, port 8010. Journaux, `/api` et le WebSocket 10000 sont `server.js` |
+| `sirenRouter` | HTTP 8002 |
 
 ## 🚀 Installation Rapide
 
@@ -127,6 +145,7 @@ Ce monorepo regroupe 4 applications interconnectées pour le contrôle, la visua
 
 - **Qt 6.10+** avec support WebAssembly
 - **Node.js 18+** et npm
+- **.NET SDK 10** (`dotnet watch`, `dotnet run`)
 - **CMake 3.19+** (système de build multiplateforme)
 - **Ninja** (générateur de build recommandé)
 - **Google Chrome** (pour le développement web)

@@ -7,7 +7,9 @@
       <NoWarn>$(NoWarn);NU1510;</NoWarn>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="Logging.fs" />
+    <ProjectReference Include="..\..\..\Infrastructure\Infrastructure.fsproj" />
+  </ItemGroup>
+  <ItemGroup>
     <Compile Include="Config.fs" />
     <Compile Include="SshProxy.fs" />
     <Compile Include="UdpRelay.fs" />

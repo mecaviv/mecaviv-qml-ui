@@ -10,7 +10,7 @@ open System.Text
 open System.Text.Json
 open System.Threading
 open System.Threading.Tasks
-open SirenManager.Backend.Logging
+open Mecaviv.Infrastructure.Logging
 
 /// Binds UDP only while at least one WebSocket client is connected.
 /// A desktop SirenManager already listens on this port; a second socket

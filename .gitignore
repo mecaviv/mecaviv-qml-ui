@@ -56,6 +56,11 @@ capture_*.png
 screenshot_*.jpg
 screenshot_*.png
 
+# .NET build output
+**/bin/Debug/
+**/bin/Release/
+**/obj/
+
 # Compiled files
 *.o
 *.obj

@@ -1,4 +1,4 @@
-module SirenManager.Backend.Logging
+module Mecaviv.Infrastructure.Logging
 
 open System
 open System.Text
@@ -33,6 +33,8 @@ let start levelName =
   Log.Logger <-
     LoggerConfiguration()
       .MinimumLevel.Is(level)
+      .MinimumLevel.Override("Microsoft.AspNetCore.Hosting.Diagnostics", LogEventLevel.Warning)
+      .MinimumLevel.Override("Microsoft.AspNetCore.StaticFiles", LogEventLevel.Warning)
       .MinimumLevel.Override("Microsoft", frameworkLevel)
       .MinimumLevel.Override("System", frameworkLevel)
       .MinimumLevel.Override("Giraffe", frameworkLevel)

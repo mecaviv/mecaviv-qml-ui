@@ -2,14 +2,14 @@
 
 Description of the Node code that sits beside the Qt/QML app, written so a port to F# or Rust can keep the same contract. The siren protocol itself is not in this process.
 
-There are two Node programs. Only the first is the service to port.
+There are two Node programs. The SSH / UDP service is ported in `fsharpwebserver`. The static server has its own project in `../webfiles` and stays out of the fleet contract below.
 
 | Program | Role | Port |
 |---|---|---|
 | `backend/server.js` + `backend/ssh-proxy.js` | SSH proxy, playlist/MIDI sync, UDP relay for the browser build | HTTP 8005, WebSocket 8006, UDP 8000 (lazy) |
 | `webfiles/server.js` | Dev static file server for the WebAssembly build. Its WebSocket only answers `{type:"ping"}`. It does not relay UDP and it does not speak SSH. | HTTP 8081, and it also binds WebSocket 8006 |
 
-`webfiles/server.js` and `backend/server.js` cannot run together: both claim port 8006. The QML client’s real UDP relay is the backend. The static server is a local page host and is not part of the fleet protocol.
+`webfiles/server.js` and the SSH backend cannot run together: both claim port 8006. The F# static host `SirenManager/webfiles` listens on 8081 only, so it can run beside `fsharpwebserver`. The QML client’s real UDP relay is the backend. The static server is a local page host and is not part of the fleet protocol.
 
 ## Why this process exists
 
