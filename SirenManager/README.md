@@ -93,15 +93,14 @@ La source est toujours Linux Maître (modèle "source de vérité unique") ; les
 
 ## Backend SSH
 
-Le service backend Node.js permet d'exécuter des commandes SSH depuis le navigateur (via WebAssembly) :
+Le service backend exécute les commandes SSH depuis le navigateur (via WebAssembly). Depuis la racine `mecaviv-qml-ui` :
 
 ```bash
-cd backend
-npm install
-node server.js
+dotnet watch --non-interactive --project SirenManager/backend/fsharpwebserver
+dotnet run --project SirenManager/backend/fsharpwebserver
 ```
 
-Le serveur écoute sur le port 8005 par défaut.
+Le serveur écoute sur le port 8005 (HTTP) et 8006 (WebSocket).
 
 ## SSH key persistence (Artila M508)
 

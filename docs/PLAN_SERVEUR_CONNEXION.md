@@ -14,7 +14,7 @@ handshake et, pour ceux qui le font, sa propre lecture des variateurs KEB :
 | patch Pd `sirenMidi2Udp` (régie, concert) | puredata-abstractions | `udpSend` par sirène, `connect` au chargement |
 | pédalier Sirénium (Pd sur Raspberry) | pedalierSirenium | neuf sockets ouvertes au chargement ; si le réseau est en retard, la session tourne sans sirène (`deploy/device/wait-network.sh`) |
 | pont `SirenUdpBridge` de SirenOrchestra | ComposeSiren | thread JUCE, IPs et type de KEB en constantes |
-| SirenManager (remplace SireneControlMac) | SirenManager/src/UdpController + backend/server.js | mêmes trames et opcodes que l'app Obj-C historique ; relais UDP ↔ WebSocket pour la version WASM, écoute sur 8000 |
+| SirenManager (remplace SireneControlMac) | SirenManager/src/UdpController + backend/fsharpwebserver | mêmes trames et opcodes que l'app Obj-C historique ; relais UDP ↔ WebSocket pour la version WASM, écoute sur 8000. `server.js` est le code Node d'origine |
 
 `sirenRouter/` est le point central prévu, mais conçu en monitoring passif (« le Router ne
 contrôle pas les sirènes ») et à l'état de spécification : seul `src/api/control.js` (takeover
@@ -23,7 +23,7 @@ REST, dernier arrivé premier servi) existe.
 ## Décision : le serveur de connexion est le service de SirenManager
 
 SirenManager est indispensable dans tous les cas de figure : c'est le produit de régie. Son
-backend Node devient donc *le* service du parc, et les autres clients (SirenOrchestra via
+backend (`backend/fsharpwebserver`) est donc *le* service du parc, et les autres clients (SirenOrchestra via
 SirenLink, patch Pd, pédalier) lui parlent — comme les pupitres parlent à SirenConsole.
 `sirenRouter/` disparaît : son takeover (`control.js`) est absorbé, sa spec « monitoring
 passif » ne correspond plus à rien.
@@ -37,11 +37,11 @@ SirenManager est le successeur de SireneControlMac, l'application macOS historiq
 donc déjà le protocole complet du parc, pas seulement le MIDI — c'est ce qui en fait le bon
 point de départ.
 
-`SirenManager/backend/server.js` a déjà ce que sirenRouter devait construire : les sockets, la
+`SirenManager/backend/fsharpwebserver` sert le contrat de `server.js` : les sockets, la
 table du parc (`backend/config.json`), le port 8000 où le firmware — et les KEB — répondent, un
 relais UDP ↔ WebSocket, et un jeu de commandes plus large que le MIDI (ST, vitesse KEB, volets,
 playlists, synchro). On y ajoute le bail de `control.js`, et ce service devient le serveur de
-connexion. Deux processus Node sur le port 8000 se partageraient le trafic entrant au hasard —
+connexion. Deux processus sur le port 8000 se partageraient le trafic entrant au hasard —
 c'est aussi ce qui interdit un second service à côté.
 
 Conditions :
@@ -51,7 +51,7 @@ Conditions :
    sockets en permanence ; SirenManager desktop passe aussi par lui (plus de socket UDP propre
    dans `UdpController`, donc plus de second listener sur 8000).
 2. **Un processus, des modules lisibles.** Bail / état / relais d'un côté, proxy SSH et
-   playlists de l'autre. Même dépôt, même `package.json`, fichiers séparés.
+   playlists de l'autre. Même dépôt, le projet `backend/fsharpwebserver`, fichiers séparés.
 3. **Une seule table du parc.** `backend/config.json` est aujourd'hui la plus complète (Linux
    Maître, Raspberry clic, S1–S7, voitures, pavillons). On y ajoute les KEB (`192.168.1.70–76`,
    port 8000, type F5/F6 — seule S4 est en F6 depuis avril 2026) et le port des cartes (8001).

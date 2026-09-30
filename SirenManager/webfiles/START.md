@@ -16,9 +16,8 @@
 Pour utiliser les fonctionnalités de maintenance système, démarrez aussi le backend :
 
 ```bash
-cd backend
-npm install
-node server.js
+dotnet watch --non-interactive --project SirenManager/backend/fsharpwebserver
+dotnet run --project SirenManager/backend/fsharpwebserver
 ```
 
 Le backend écoute sur :

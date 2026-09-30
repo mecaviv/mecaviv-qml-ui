@@ -1,0 +1,3 @@
+FSharp.Core
+Serilog.Extensions.Logging
+Serilog.Sinks.Console

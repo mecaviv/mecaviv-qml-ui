@@ -1,0 +1,5 @@
+root = true
+
+[*.{fs,fsx,fsi}]
+indent_style = space
+indent_size = 2

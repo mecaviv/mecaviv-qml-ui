@@ -344,6 +344,7 @@
       "role": "cb4tech"
     }
   },
+  "logLevel": "Debug",
   "ports": {
     "http": 8005,
     "websocket": 8006,

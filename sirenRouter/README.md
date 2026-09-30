@@ -256,6 +256,19 @@ http://localhost:8002/dashboard
 
 ## 🚀 Installation et Utilisation
 
+Le projet de ce dossier est `SirenRouter.fsproj`. Depuis `mecaviv-qml-ui` :
+
+```bash
+dotnet watch --non-interactive --project sirenRouter
+dotnet run --project sirenRouter
+```
+
+Il écoute sur le port 8002. Le module Node présent est `src/api/control.js`.
+
+### Service spécifié
+
+Les étapes qui suivent décrivent le service visé par ce document (API, WebSocket, UDP, tableau de bord).
+
 ### Prérequis
 - Node.js 18+
 - npm ou yarn

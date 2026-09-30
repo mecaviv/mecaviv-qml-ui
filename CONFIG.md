@@ -39,6 +39,7 @@ Avant de configurer, assurez-vous d'avoir installé :
 - Qt 6.10+ (Desktop + WebAssembly)
 - CMake 3.19+
 - Node.js 18+
+- .NET SDK 10 (`dotnet watch`, `dotnet run`)
 - Ninja
 
 ## 🔧 Configuration des Chemins Qt

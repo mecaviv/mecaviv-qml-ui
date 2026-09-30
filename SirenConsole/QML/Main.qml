@@ -11,43 +11,35 @@ ApplicationWindow {
     visible: true
     title: "SirenConsole - Console de Contrôle des Pupitres"
     
-    // En WebAssembly, l'ApplicationWindow s'adapte automatiquement au conteneur HTML (#screen)
-    // Utiliser Screen avec des bindings pour détecter les changements
-    width: Screen.desktopAvailableWidth > 0 ? Screen.desktopAvailableWidth : (Screen.width > 0 ? Screen.width : 1920)
-    height: Screen.desktopAvailableHeight > 0 ? Screen.desktopAvailableHeight : (Screen.height > 0 ? Screen.height : 1080)
-    
-    // Minimum size pour éviter que la fenêtre soit trop petite
+    // Screen.desktopAvailable* is the virtual desktop (every monitor combined).
+    // Binding the window to it stretches the layout across all displays.
+    // Desktop: maximize on the screen the window is on.
+    // WebAssembly: one canvas, follow the browser size.
+    readonly property bool followBrowserCanvas: Qt.platform.os === "wasm"
+
+    width: followBrowserCanvas ? (Screen.width > 0 ? Screen.width : 1920) : 1280
+    height: followBrowserCanvas ? (Screen.height > 0 ? Screen.height : 1080) : 800
+
     minimumWidth: 800
     minimumHeight: 600
-    
-    // La taille de la fenêtre est gérée par les propriétés width/height ci-dessus
-    // Pas besoin d'écouter les changements de Screen car cela cause des erreurs QML
-    
-    // Timer de secours pour détecter les changements de taille (plein écran)
-    // En WebAssembly, Screen.width/height ne se met pas toujours à jour automatiquement
+
+    Component.onCompleted: {
+        if (!followBrowserCanvas)
+            Qt.callLater(showMaximized)
+    }
+
     Timer {
-        id: resizeCheckTimer
-        interval: 100 // Vérifier toutes les 100ms pour une réactivité rapide
-        running: true
+        interval: 100
+        running: mainWindow.followBrowserCanvas
         repeat: true
         onTriggered: {
-            // Vérifier si la taille de l'écran a changé
-            var newWidth = Screen.desktopAvailableWidth > 0 ? Screen.desktopAvailableWidth : (Screen.width > 0 ? Screen.width : 1920)
-            var newHeight = Screen.desktopAvailableHeight > 0 ? Screen.desktopAvailableHeight : (Screen.height > 0 ? Screen.height : 1080)
-            
-            // Mettre à jour si la différence est significative (> 10px pour éviter les micro-ajustements)
+            var newWidth = Screen.width > 0 ? Screen.width : 1920
+            var newHeight = Screen.height > 0 ? Screen.height : 1080
             if (Math.abs(mainWindow.width - newWidth) > 10 || Math.abs(mainWindow.height - newHeight) > 10) {
                 mainWindow.width = newWidth
                 mainWindow.height = newHeight
             }
         }
-    }
-    
-    // S'adapter automatiquement aux changements de taille de l'écran
-    Component.onCompleted: {
-        // Main.qml chargé
-        // En WebAssembly, l'ApplicationWindow s'adapte automatiquement au conteneur HTML (#screen)
-        // La taille est gérée par Screen.width/height qui suit la taille du navigateur
     }
     
     // Police Emoji globale
