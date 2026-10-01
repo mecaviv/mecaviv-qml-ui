@@ -95,7 +95,8 @@ let command =
     $"echo '##df'; df; echo '##du'; du -sk {q home} {q midi} {q lists} /tmp /var/log 2>/dev/null; "
     + $"echo '##ls'; ls -l {q home} {q midi} {q lists} 2>/dev/null"
   | Dmesg(Tail n) -> $"dmesg | tail -{n}"
-  | Dmesg ErrorsOnly -> "dmesg -l err"
+  // BusyBox 1.00 has no `dmesg -l`, and its lines carry no level: match the words.
+  | Dmesg ErrorsOnly -> "dmesg | grep -i -e error -e fail -e warn -e oops -e panic"
   | Playlists(dir, pointer) ->
     $"cd {q dir} && for f in *; do [ -f \"$f\" ] && echo \"##pl $f\" && cat \"$f\" && echo; done; "
     + $"echo '##active'; cat {q pointer} 2>/dev/null"

@@ -9,7 +9,8 @@ trackCpu;Mesure la charge CPU en\ncontinu et la trace dans\nle graphique.
 diskDetail;Rafraîchit le détail du disque :\noccupation par dossier et\nplus gros fichiers.
 kernelThreads;Affiche aussi les threads\ndu noyau dans la liste\ndes processus.
 trackDmesg;Rafraîchit dmesg en continu\net suit les nouvelles lignes.
-dmesgAll;Charge tous les messages\ndu journal noyau.
-dmesgErrors;Charge seulement les\nerreurs et alertes\ndu journal noyau.
 refreshAll;Rafraîchit d’un coup :\nétat système, détail disque,\ndmesg et playlists.
-followAll;Active ou coupe le suivi continu\ndu CPU et de dmesg, et affiche\nles processus noyau.
+followAll;Active ou coupe le suivi continu\ndu CPU et de dmesg, la lecture\ndes processus et les processus noyau.
+pollProcs;Lit ou non la liste des processus\nà chaque suivi CPU. Désactivée,\nla carte ne lit plus /proc/<pid> :\nmoins de charge.
+dmesgFilter;Tout : le journal noyau complet.\nErreurs : seulement les lignes qui\nparlent d’erreur, d’échec ou d’alerte\n(filtrées ici, pas sur la carte).
+dmesgRefresh;Relit dmesg sur la carte\n(les 100 dernières lignes).

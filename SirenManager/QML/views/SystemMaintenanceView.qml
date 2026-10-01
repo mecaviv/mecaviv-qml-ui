@@ -70,6 +70,12 @@ Rectangle {
     property bool dmesgInFlight: false
     property bool cpuInFlight: false
     property string lastDmesgText: ""
+    property string dmesgRaw: ""                  // what the board last gave (the ring is ~50 lines)
+    property bool dmesgErrorsOnly: false          // "Erreurs": filtered here, not on the board
+    readonly property int dmesgTail: 100
+    // BusyBox 1.00's dmesg has no -l and the lines carry no level, so "errors"
+    // means lines that read like one; the filter runs on the text we already hold.
+    readonly property var dmesgErrorPattern: /error|fail|warn|oops|panic|bug:|segfault|unable|cannot/i
     property var cpuPrev: null                    // {total, idle} of the last /proc/stat
     property var cpuSamples: []                   // percent, oldest first
     property bool diskDetailLoaded: false         // the full detail replaced the filesystem summary
@@ -80,6 +86,10 @@ Rectangle {
     property var processes: []                    // [{pid, name, state, cpu, rssKb, threads}]
     property string procSort: "cpu"               // cpu | mem | pid | name
     property bool showKernelThreads: false
+    property bool pollProcesses: false            // read /proc/<pid> on each CPU tick (not remembered)
+    property int procTick: 0
+    property var procUsers: ({})                  // pid -> owner, from the last owner reads
+
     property bool procSeen: false                 // a tick has delivered a process list
 
     // Readings of the summary tiles: set by "Rafraîchir" (system-info) and,
@@ -93,7 +103,7 @@ Rectangle {
     function requestDmesgTrack() {
         if (dmesgInFlight) return
         dmesgInFlight = true
-        SshManager.executeCommand(currentMachine().id, "dmesg | tail -150", "dmesg-track")
+        SshManager.executeCommand(currentMachine().id, "dmesg | tail -" + dmesgTail, "dmesg-track")
     }
 
     function requestCpuTrack() {
@@ -103,11 +113,17 @@ Rectangle {
         // one stat file per process: small /proc reads, no top/ps (BusyBox 1.00
         // on the Artila has neither the options nor the patience), so the
         // measurement barely loads the board it measures.
-        SshManager.executeCommand(currentMachine().id,
-            "grep '^cpu' /proc/stat; cat /proc/loadavg;"
-            + " cat /proc/meminfo;"
-            + " cat /proc/[0-9]*/stat 2>/dev/null;"
-            + " grep '^Uid:' /proc/[0-9]*/status 2>/dev/null; cat /etc/passwd 2>/dev/null", "cpu-track")
+        // Without the process list the tick is three reads. With it: one stat file
+        // per process, plus the owners (status files and passwd) every 12th tick;
+        // a process that appears in between shows no owner until then.
+        var cmd = "grep '^cpu' /proc/stat; cat /proc/loadavg; cat /proc/meminfo;"
+        if (pollProcesses) {
+            cmd += " cat /proc/[0-9]*/stat 2>/dev/null;"
+            if (procTick % 12 === 0)
+                cmd += " grep '^Uid:' /proc/[0-9]*/status 2>/dev/null; cat /etc/passwd 2>/dev/null"
+            procTick++
+        }
+        SshManager.executeCommand(currentMachine().id, cmd, "cpu-track")
     }
 
     function onCpuSample(output) {
@@ -159,13 +175,17 @@ Rectangle {
     function onProcessSample(output, dTotal) {
         var list = [], now = {}
         // Owners: "/proc/<pid>/status:Uid:<uid>..." lines, named from /etc/passwd.
-        var uidOf = {}, nameOf = {}
+        var uidOf = {}, nameOf = {}, users = {}
         output.split("\n").forEach(function(line) {
             var u = line.match(/^\/proc\/(\d+)\/status:Uid:\s+(\d+)/)
             if (u) { uidOf[u[1]] = u[2]; return }
             var p = line.match(/^([^:\s]+):[^:]*:(\d+):\d+:/)
             if (p) nameOf[p[2]] = p[1]
         })
+        for (var k in uidOf) users[k] = nameOf[uidOf[k]] || uidOf[k]
+        var known = {}
+        for (var k2 in procUsers) known[k2] = procUsers[k2]
+        for (var k3 in users) known[k3] = users[k3]
         output.split("\n").forEach(function(line) {
             var m = line.match(/^(\d+) \((.*)\) (\S) (.*)$/)
             if (!m) return
@@ -178,7 +198,7 @@ Rectangle {
             list.push({
                 pid: pid, name: m[2], state: m[3],
                 ppid: parseInt(r[0]),
-                user: uidOf[pid] === undefined ? "?" : (nameOf[uidOf[pid]] || uidOf[pid]),
+                user: known[pid] !== undefined ? known[pid] : "",
                 cpu: Math.max(0, cpu),
                 rssKb: parseInt(r[20]) * 4,              // pages of 4 kB
                 virtKb: Math.round(parseInt(r[19]) / 1024),
@@ -186,6 +206,9 @@ Rectangle {
             })
         })
         if (list.length === 0) return
+        var kept = {}
+        list.forEach(function(p) { if (known[p.pid] !== undefined) kept[p.pid] = known[p.pid] })
+        procUsers = kept
         procPrev = now
         procSeen = true
         processes = list
@@ -317,6 +340,8 @@ Rectangle {
         procPrev = ({})
         processes = []
         procSeen = false
+        procUsers = ({})
+        procTick = 0
     }
 
     function resetSystemInfo() {
@@ -341,12 +366,19 @@ Rectangle {
         }
 
         function onBackendReply(requestId, success, bodyJson, error) {
-            if (requestId === "midi-info" && success) {
-                var info = JSON.parse(bodyJson).info
-                var merged = {}
-                for (var k in root.midiInfo) merged[k] = root.midiInfo[k]
-                for (var n in info) if (!info[n].error) merged[n] = info[n]
-                root.midiInfo = merged
+            var parts = requestId.split(":")
+            if (parts[0] !== "midi-scan" && parts[0] !== "midi-poll") return
+            if (parseInt(parts[1]) !== root.midiGen) return                 // a cancelled run
+            var body = success ? JSON.parse(bodyJson) : null
+            if (parts[0] === "midi-scan") {
+                if (!body) { playlistStatus.text = "MIDI : " + error; return }
+                root.midiJob = body.jobId
+                root.midiVia = body.via
+                root.pollMidi()
+            } else {
+                root.midiPolling = false
+                if (!body || body.error === "unknown job" && !body.lines) { root.midiJob = ""; return }
+                root.takeMidiLines(body)
             }
         }
 
@@ -366,14 +398,7 @@ Rectangle {
             // Tracked polls run in the background: no spinner, no busy flag.
             if (requestId === "dmesg-track") {
                 dmesgInFlight = false
-                if (success && trackDmesg.checked) {
-                    var html = ansiToHtml(output)
-                    if (html !== lastDmesgText) {
-                        lastDmesgText = html
-                        dmesgArea.text = html
-                        Qt.callLater(scrollDmesgToEnd)
-                    }
-                }
+                if (success && trackDmesg.checked) { dmesgRaw = output; renderDmesg() }
                 return
             }
             if (requestId === "cpu-track") {
@@ -396,7 +421,9 @@ Rectangle {
                     }
                 }
             } else if (requestId === "dmesg") {
-                dmesgArea.text = success ? ansiToHtml(output) : ansiToHtml("Erreur: " + error)
+                dmesgRaw = success ? output : "Erreur: " + error
+                lastDmesgText = ""
+                renderDmesg()
             } else if (requestId === "ls-playlists") {
                 if (success) {
                     var pls = parsePlaylists(output)
@@ -634,11 +661,29 @@ Rectangle {
         if (bar) bar.position = 1.0 - bar.size
     }
 
-    function refreshDmesg(filterErr) {
+    function refreshDmesg() {
         busy = true
         dmesgArea.text = "Chargement..."
-        var cmd = filterErr ? "dmesg -l err" : "dmesg | tail -200"
-        SshManager.executeCommand(currentMachine().id, cmd, "dmesg")
+        SshManager.executeCommand(currentMachine().id, "dmesg | tail -" + dmesgTail, "dmesg")
+    }
+
+    // Shows the held text, filtered when "Erreurs" is chosen (no request needed).
+    function renderDmesg() {
+        var text = dmesgRaw
+        if (dmesgErrorsOnly && !text.startsWith("Erreur:")) {
+            text = text.split("\n").filter(function(l) { return dmesgErrorPattern.test(l) }).join("\n")
+            if (text === "") text = "(aucune ligne d'erreur)"
+        }
+        var html = ansiToHtml(text)
+        if (html === lastDmesgText) return
+        lastDmesgText = html
+        dmesgArea.text = html
+        Qt.callLater(scrollDmesgToEnd)
+    }
+    function setDmesgFilter(errorsOnly) {
+        dmesgErrorsOnly = errorsOnly
+        if (dmesgRaw === "") refreshDmesg()
+        else renderDmesg()
     }
 
     // One ssh round trip: every playlist file's content, then the pointer
@@ -685,17 +730,84 @@ Rectangle {
     property var playlists: []
     property var midiInfo: ({})               // MIDI file name -> what the file says (backend /api/midi/info)
 
-    // One request for every file the playlists name: the backend reads them in
-    // a single ssh session and parses length, tempo, tracks and channels.
+    // MIDI facts come in gradually. The playlists name some files, many of them in
+    // several playlists: each distinct file is asked about once. The backend runs a
+    // job: readings it already holds (size and mtime unchanged) come first, the rest
+    // are read on the board by midi-info-board (or through ssh on a Pi), one file at a
+    // time with a pause in between, so the sequencer keeps the CPU. The job is polled;
+    // each line fills its rows as it lands, and `midiReading` is the file being read.
+    property int midiGen: 0                       // bumped to cancel a run (machine change, new listing)
+    property string midiJob: ""                   // the running job's id
+    property int midiNext: 0                      // result lines already taken
+    property int midiTotal: 0                     // files in the run
+    property var midiSeen: ({})                   // files that have answered
+    property string midiReading: ""               // the file being read now
+    property string midiVia: ""                   // "board" or "transfer"
+    property var midiFailed: ({})                 // file -> why it could not be read
+    property bool midiPolling: false
+    readonly property int midiPauseMs: 1000       // after every file: low CPU matters more than speed
+
+    function stopMidi() {
+        if (midiJob !== "") SshManager.callBackend("/api/midi/scan/cancel", JSON.stringify({ jobId: midiJob }), "midi-cancel")
+        midiGen++
+        midiJob = ""; midiReading = ""; midiPolling = false
+    }
     function requestMidiInfo(pls) {
         var seen = {}, files = []
         pls.forEach(function(p) { p.entries.forEach(function(e) {
             if (e.file && !seen[e.file]) { seen[e.file] = true; files.push(e.file) }
         }) })
+        stopMidi()
+        midiNext = 0; midiTotal = files.length; midiSeen = ({}); midiFailed = ({}); midiVia = ""
         if (files.length === 0) return
         var id = currentMachine().id
-        SshManager.callBackend("/api/midi/info",
-            JSON.stringify({ machineType: id, dir: MachinePaths.midiPath(id), files: files }), "midi-info")
+        SshManager.callBackend("/api/midi/scan",
+            JSON.stringify({ machineType: id, dir: MachinePaths.midiPath(id), files: files, pauseMs: midiPauseMs }), "midi-scan:" + midiGen)
+    }
+    function mergeMidi(more) {
+        var merged = {}
+        for (var k in midiInfo) merged[k] = midiInfo[k]
+        for (var n in more) merged[n] = more[n]
+        midiInfo = merged
+    }
+    function pollMidi() {
+        if (midiJob === "" || midiPolling) return
+        midiPolling = true
+        SshManager.callBackend("/api/midi/scan/poll", JSON.stringify({ jobId: midiJob, from: midiNext }), "midi-poll:" + midiGen)
+    }
+    // One poll answered: its lines go into the readings, the status line says where it is.
+    function takeMidiLines(body) {
+        var more = {}, failed = null, seen = null
+        body.lines.forEach(function(l) {
+            if (!seen) { seen = {}; for (var k in midiSeen) seen[k] = true }
+            seen[l.file] = true
+            if (l.info) {
+                var i = l.info
+                i.masterMatch = l.masterMatch              // undefined while the master is unknown
+                more[l.file] = i
+            } else {
+                if (!failed) { failed = {}; for (var f in midiFailed) failed[f] = midiFailed[f] }
+                failed[l.file] = l.error || "illisible"
+            }
+        })
+        midiNext += body.lines.length
+        if (seen) midiSeen = seen
+        if (failed) midiFailed = failed
+        mergeMidi(more)
+        midiReading = body.current
+        var done = Object.keys(midiSeen).length
+        if (body.done) {
+            midiJob = ""; midiReading = ""
+            playlistStatus.text = body.error ? "MIDI : " + body.error : playlists.length + " playlist(s)"
+        } else {
+            playlistStatus.text = "MIDI " + (midiVia === "board" ? "(carte) " : "") + done + " / " + midiTotal
+                                  + (body.current !== "" ? " · " + body.current : "")
+        }
+    }
+    Timer {
+        interval: 600; repeat: true
+        running: root.midiJob !== "" && root.visible
+        onTriggered: root.pollMidi()
     }
 
     function fmtDur(sec) {
@@ -717,7 +829,7 @@ Rectangle {
 
     // Playlists with their MIDI facts and the text widths that fit them: each
     // column is as wide as its longest row, no wider.
-    function buildPlaylistsView(pls, info) {
+    function buildPlaylistsView(pls, info, reading, failed, busyReading) {
         var maxDur = 1
         pls.forEach(function(p) { p.entries.forEach(function(e) {
             var i = info[e.file]; if (i && i.durationSec) maxDur = Math.max(maxDur, i.durationSec)
@@ -729,24 +841,39 @@ Rectangle {
                 var ok = i && i.durationSec !== undefined
                 if (ok) { total += i.durationSec; known++ }
                 var tip = e.file
+                var state = ok ? "ok" : e.file === reading ? "reading" : failed[e.file] !== undefined ? "failed" : "pending"
+                if (state === "reading") tip += "\nlecture en cours…"
+                if (state === "failed") tip += "\nillisible : " + failed[e.file]
+                var mark = "", markColor = "#888"
+                if (ok && i.split) {
+                    // A file cut by midi-split: its own hash, and the master it came from.
+                    var sp = i.split
+                    tip += "\ndécoupé : canal " + (sp.channel) + " · maître " + sp.masterSha.substring(0, 10) + "…"
+                    if (sp.ownOk === false) { mark = "✗"; markColor = "#d98a7a"; tip += "\nfichier endommagé (somme de contrôle)" }
+                    else if (i.masterMatch === true) { mark = "✓"; markColor = "#7fbf94"; tip += "\nidentique au maître (somme de contrôle valide)" }
+                    else if (i.masterMatch === false) { mark = "⚠"; markColor = "#d4a85a"; tip += "\nle maître a changé depuis la découpe" }
+                    else { mark = "·"; tip += "\nmaître pas encore comparé" + (sp.ownOk === true ? " (somme du fichier valide)" : "") }
+                }
                 if (ok) tip += "\n" + i.tracks + " pistes · " + i.notes + " notes · " + i.timeSig + " · " + i.ppq + " ppq"
                               + "\ncanaux " + fmtChannels(i.channels)
                               + (i.tempoChanges > 1 ? "\n" + i.tempoChanges + " changements de tempo" : "")
                 return {
                     slot: e.slot, label: e.pseudo !== "" ? e.pseudo : e.file, loop: e.loop, chain: e.chain,
-                    dur: ok ? fmtDur(i.durationSec) : "", durFrac: ok ? i.durationSec / maxDur : 0,
+                    state: state, mark: mark, markColor: markColor,
+                    dur: ok ? fmtDur(i.durationSec) : state === "reading" ? "…" : state === "failed" ? "✗" : "", durFrac: ok ? i.durationSec / maxDur : 0,
                     bpm: ok ? String(Math.round(i.bpm)) : "", ch: ok ? fmtChannels(i.channels) : "", tip: tip
                 }
             })
-            function w(key) { return rows.reduce(function(a, r) { return Math.max(a, String(r[key]).length) }, 0) }
+            function w(key, reserve) { return Math.max(busyReading ? reserve : 0, rows.reduce(function(a, r) { return Math.max(a, String(r[key]).length) }, 0)) }
             return {
                 name: p.name, active: p.active, count: rows.length,
                 total: known > 0 ? fmtDur(total) + (known < rows.length ? "+" : "") : "",
-                rows: rows, labelChars: w("label"), durChars: w("dur"), bpmChars: w("bpm"), chChars: w("ch")
+                rows: rows, labelChars: w("label", 0), durChars: w("dur", 5), bpmChars: w("bpm", 3), chChars: w("ch", 8),
+                markChars: rows.some(function(r) { return r.mark !== "" }) ? 2 : 0
             }
         })
     }
-    readonly property var playlistsView: buildPlaylistsView(playlists, midiInfo)
+    readonly property var playlistsView: buildPlaylistsView(playlists, midiInfo, midiReading, midiFailed, midiJob !== "")
     TextMetrics { id: monoM; font.family: "Menlo"; font.pixelSize: 11; text: "0000000000" }
     readonly property real charW: monoM.advanceWidth / 10
 
@@ -754,7 +881,7 @@ Rectangle {
     function refreshAll() {
         refreshSystemInfo()
         requestDiskDetail()
-        refreshDmesg(false)
+        refreshDmesg()
         listPlaylists()
     }
 
@@ -902,6 +1029,7 @@ Rectangle {
                         root.selectedMachineIdx = currentIndex
                         root.resetSystemInfo()
                         dmesgArea.text = ""
+                        root.dmesgRaw = ""
                         root.lastDmesgText = ""
                         diskDetailArea.text = ""
                         root.diskDetailLoaded = false
@@ -909,6 +1037,8 @@ Rectangle {
                         root.loadHistory()
                         root.refreshSystemInfo()
                         root.playlists = []
+                        root.stopMidi()
+                        root.midiInfo = ({})
                         playlistStatus.text = ""
                     }
                 }
@@ -936,7 +1066,8 @@ Rectangle {
                     Layout.preferredHeight: 32
                     checkable: true
                     checked: trackCpu.checked && trackDmesg.checked
-                    onToggled: { var on = checked; trackCpu.checked = on; trackDmesg.checked = on; root.showKernelThreads = on }
+                    onToggled: { var on = checked; trackCpu.checked = on; trackDmesg.checked = on; root.showKernelThreads = on; root.pollProcesses = on
+                                 if (!on) { root.processes = []; root.procSeen = false } }
                     ToolTip.visible: hovered && ToolTip.text.length > 0
                     ToolTip.delay: 600
                     ToolTip.text: root.tip("followAll")
@@ -1198,6 +1329,16 @@ Rectangle {
                             }
                             Item { Layout.fillWidth: true }
                             CheckBox {
+                                text: "Lecture"
+                                ToolTip.visible: hovered && ToolTip.text.length > 0
+                                ToolTip.delay: 600
+                                ToolTip.text: root.tip("pollProcs")
+                                Layout.preferredHeight: 24
+                                padding: 0
+                                checked: root.pollProcesses
+                                onToggled: { root.pollProcesses = checked; if (!checked) { root.processes = []; root.procSeen = false } }
+                            }
+                            CheckBox {
                                 text: "Noyau"
                                 ToolTip.visible: hovered && ToolTip.text.length > 0
                                 ToolTip.delay: 600
@@ -1271,7 +1412,8 @@ Rectangle {
                             visible: !root.procSeen
                             Layout.fillWidth: true
                             Layout.margins: 8
-                            text: trackCpu.checked ? "Lecture des processus…" : "Cocher « Suivre » (CPU) pour lister les processus"
+                            text: !root.pollProcesses ? "Lecture des processus désactivée (case « Lecture »)"
+                                  : trackCpu.checked ? "Lecture des processus…" : "Cocher « Suivre » (CPU) pour lister les processus"
                             color: "#777"; font.pixelSize: 11
                             wrapMode: Text.Wrap
                         }
@@ -1348,21 +1490,25 @@ Rectangle {
                         padding: 0
                         onCheckedChanged: if (checked) root.lastDmesgText = ""
                     }
-                    Button {
-                        text: "Tout"
-                        Layout.preferredHeight: 24
-                        onClicked: refreshDmesg(false)
-                        ToolTip.visible: hovered && ToolTip.text.length > 0
+                    SegmentedToggle {
+                        model: ["Tout", "Erreurs"]
+                        currentIndex: root.dmesgErrorsOnly ? 1 : 0
+                        onActivated: function(index) { root.setDmesgFilter(index === 1) }
+                        ToolTip.visible: tipHover.hovered && ToolTip.text.length > 0
                         ToolTip.delay: 600
-                        ToolTip.text: root.tip("dmesgAll")
+                        ToolTip.text: root.tip("dmesgFilter")
+                        HoverHandler { id: tipHover }
                     }
                     Button {
-                        text: "Erreurs"
+                        text: "↻"
+                        Accessible.name: "Relire dmesg"
+                        font.pixelSize: 15
+                        Layout.preferredWidth: 28
                         Layout.preferredHeight: 24
-                        onClicked: refreshDmesg(true)
+                        onClicked: root.refreshDmesg()
                         ToolTip.visible: hovered && ToolTip.text.length > 0
                         ToolTip.delay: 600
-                        ToolTip.text: root.tip("dmesgErrors")
+                        ToolTip.text: root.tip("dmesgRefresh")
                     }
                 }
             }
@@ -1401,7 +1547,8 @@ Rectangle {
                             readonly property real rowsW: cw * 2 + 6 + cw * modelData.labelChars
                                 + (modelData.durChars > 0 ? 6 + cw * modelData.durChars : 0)
                                 + (modelData.bpmChars > 0 ? 6 + cw * modelData.bpmChars : 0)
-                                + (modelData.chChars > 0 ? 6 + cw * modelData.chChars : 0) + 6 + 20
+                                + (modelData.chChars > 0 ? 6 + cw * modelData.chChars : 0)
+                                + (modelData.markChars > 0 ? 6 + cw * modelData.markChars : 0) + 6 + 20
                             // As wide as its longest row (or its title), no wider.
                             width: Math.max(plTitle.implicitWidth + 8, rowsW + 8 + 12)
                             height: plRow.height
@@ -1444,7 +1591,7 @@ Rectangle {
                                                 visible: width > 0
                                                 width: plBox.cw * plBox.modelDataChars("durChars"); horizontalAlignment: Text.AlignRight
                                                 text: plRowItem.r.dur
-                                                color: root.sizeColor(plRowItem.r.durFrac); font.family: "Menlo"; font.pixelSize: 11
+                                                color: plRowItem.r.state === "reading" ? "#ff9f1a" : plRowItem.r.state === "failed" ? "#d98a7a" : root.sizeColor(plRowItem.r.durFrac); font.family: "Menlo"; font.pixelSize: 11
                                             }
                                             Label {
                                                 visible: width > 0
@@ -1455,6 +1602,11 @@ Rectangle {
                                                 visible: width > 0
                                                 width: plBox.cw * plBox.modelDataChars("chChars")
                                                 text: plRowItem.r.ch; color: "#c78fe0"; font.family: "Menlo"; font.pixelSize: 11
+                                            }
+                                            Label {
+                                                visible: width > 0
+                                                width: plBox.cw * plBox.modelDataChars("markChars")
+                                                text: plRowItem.r.mark; color: plRowItem.r.markColor; font.pixelSize: 11
                                             }
                                             Label { width: 20; text: (plRowItem.r.loop ? "↻" : "") + (plRowItem.r.chain ? "⛓" : ""); color: "#5a9ae0"; font.pixelSize: 11 }
                                         }

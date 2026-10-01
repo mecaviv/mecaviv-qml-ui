@@ -26,6 +26,31 @@ let globToRegex glob =
   let escaped = Regex.Escape(glob).Replace("\\*", ".*").Replace("\\?", ".")
   Regex("^" + escaped + "$", RegexOptions.IgnoreCase ||| RegexOptions.CultureInvariant)
 
+/// One ssh connection per board, kept open and shared by every request: OpenSSH
+/// `ControlMaster auto` starts the master on the first request and keeps it for
+/// `ControlPersist` seconds (10 minutes) after the last; a request finding the master gone (board
+/// rebooted, socket stale) simply starts a new one. The keep-alive makes a silently
+/// lost link die within ~20 s instead of hanging requests. Set SIREN_SSH_NOMUX=1 to
+/// go back to one connection per request.
+let muxOptions =
+  if Environment.GetEnvironmentVariable "SIREN_SSH_NOMUX" = "1" then
+    []
+  else
+    let sock = Path.Combine(Environment.GetFolderPath Environment.SpecialFolder.UserProfile, ".ssh", "sm-%C")
+
+    [ "-o"; "ControlMaster=auto"
+      "-o"; $"ControlPath={sock}"
+      "-o"; "ControlPersist=600"
+      "-o"; "ServerAliveInterval=10"
+      "-o"; "ServerAliveCountMax=2" ]
+
+/// The options every request starts with (the Node behaviour).
+let baseOptions =
+  [ "-o"; "BatchMode=yes"
+    "-o"; "ConnectTimeout=5"
+    "-o"; "StrictHostKeyChecking=accept-new"
+    "-o"; "ForwardX11=no" ]
+
 /// OpenSSH argv, unchanged. CliWrap replaces Process.
 let runBytesQ (quiet: bool) label sshTarget remoteCommand stdin =
   task {
@@ -41,19 +66,7 @@ let runBytesQ (quiet: bool) label sshTarget remoteCommand stdin =
 
     let! result =
       command "ssh" {
-        args
-          [
-            "-o"
-            "BatchMode=yes"
-            "-o"
-            "ConnectTimeout=5"
-            "-o"
-            "StrictHostKeyChecking=accept-new"
-            "-o"
-            "ForwardX11=no"
-            sshTarget
-            remoteCommand
-          ]
+        args (baseOptions @ muxOptions @ [ sshTarget; remoteCommand ])
 
         validation CommandResultValidation.None
         stdin input
@@ -95,6 +108,82 @@ let executeQuiet cfg machineType command =
   task {
     let! bytes = runBytesQ true "ssh" (target cfg machineType) command None
     return Encoding.UTF8.GetString bytes
+  }
+
+/// Collects the bytes of a stream and, after every `chunk` bytes, waits `pauseMs`
+/// before accepting more. While it waits the local ssh cannot hand its stdout over,
+/// the channel window fills, and the board's `cat` blocks: the transfer goes in
+/// steps and the board's CPU, which the cipher saturates, is left to m_seq between
+/// them. (BusyBox 1.00 has no `dd`/`head -c`, and `tail -c +N` fails from 64 KB.)
+type private PacedStream(chunk: int, pauseMs: int) =
+  inherit Stream()
+  let buf = new MemoryStream()
+  let mutable sinceBreak = 0
+  member _.Bytes = buf.ToArray()
+  member _.Chunks = (int buf.Length + chunk - 1) / chunk
+  override _.CanRead = false
+  override _.CanSeek = false
+  override _.CanWrite = true
+  override _.Length = raise (NotSupportedException())
+  override _.Position with get () = raise (NotSupportedException()) and set _ = raise (NotSupportedException())
+  override _.Flush() = ()
+  override _.Read(_, _, _) = raise (NotSupportedException())
+  override _.Seek(_, _) = raise (NotSupportedException())
+  override _.SetLength _ = raise (NotSupportedException())
+
+  override _.Write(data: byte[], offset: int, count: int) =
+    buf.Write(data, offset, count)
+    sinceBreak <- sinceBreak + count
+
+  override this.WriteAsync(data: ReadOnlyMemory<byte>, ct: System.Threading.CancellationToken) =
+    buf.Write(data.Span)
+    sinceBreak <- sinceBreak + data.Length
+
+    if pauseMs > 0 && sinceBreak >= chunk then
+      sinceBreak <- 0
+      System.Threading.Tasks.ValueTask(System.Threading.Tasks.Task.Delay(pauseMs, ct))
+    else
+      System.Threading.Tasks.ValueTask()
+
+/// A remote file read in paced steps (see PacedStream); returns the bytes and the step count.
+let readPaced cfg machineType (path: string) (chunkBytes: int) (pauseMs: int) =
+  task {
+    use paced = new PacedStream(chunkBytes, pauseMs)
+
+    let argv =
+      baseOptions @ muxOptions @ [ target cfg machineType; "cat " + shellQuote path ]
+
+    let! result =
+      Cli
+        .Wrap("ssh")
+        .WithArguments(argv)
+        .WithValidation(CommandResultValidation.None)
+        .WithStandardOutputPipe(PipeTarget.ToStream paced)
+        .ExecuteAsync()
+
+    if result.ExitCode <> 0 then
+      raise (SshError $"cat {path} exited {result.ExitCode}")
+
+    return paced.Bytes, paced.Chunks
+  }
+
+/// Runs a remote command and hands every stdout line to `onLine` as it arrives; the
+/// token stops it (the ssh client is killed). Returns the exit code.
+let streamLines cfg machineType (remoteCommand: string) (onLine: string -> unit) (ct: System.Threading.CancellationToken) =
+  task {
+    let argv = baseOptions @ muxOptions @ [ target cfg machineType; remoteCommand ]
+
+    try
+      let! result =
+        Cli
+          .Wrap("ssh")
+          .WithArguments(argv)
+          .WithValidation(CommandResultValidation.None)
+          .WithStandardOutputPipe(PipeTarget.ToDelegate(fun l -> onLine l))
+          .ExecuteAsync(ct)
+
+      return result.ExitCode
+    with :? OperationCanceledException -> return -1
   }
 
 let execute cfg machineType command =

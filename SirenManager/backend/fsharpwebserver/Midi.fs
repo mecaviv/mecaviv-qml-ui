@@ -11,6 +11,14 @@ module SirenManager.Backend.Midi
 open System
 open System.Text
 
+/// What a midi-split file says about itself (see tools/midi-split): the channel it was cut
+/// for, the length and SHA-256 of the master it came from, and whether its own hash holds.
+type SplitInfo =
+  { Channel: int
+    MasterLen: int64
+    MasterSha: string
+    OwnOk: bool option }  // None: not checked
+
 type MidiInfo =
   { Name: string          // first track name meta, when the file has one
     Format: int
@@ -21,7 +29,9 @@ type MidiInfo =
     TempoChanges: int
     TimeSig: string       // "4/4"
     Notes: int
-    Channels: int list }  // 1..16
+    Channels: int list    // 1..16
+    Sha256: string        // of the file, when it was asked for ("" otherwise)
+    Split: SplitInfo option }
 
 let private be16 (b: byte[]) i = int b[i] <<< 8 ||| int b[i + 1]
 let private be32 (b: byte[]) i = (int64 b[i] <<< 24) ||| (int64 b[i + 1] <<< 16) ||| (int64 b[i + 2] <<< 8) ||| int64 b[i + 3]
@@ -155,7 +165,9 @@ let parse (b: byte[]) : Result<MidiInfo, string> =
             TempoChanges = tempos.Length
             TimeSig = tracks |> Seq.tryPick (fun t -> t.TimeSig) |> Option.defaultValue "4/4"
             Notes = tracks |> Seq.sumBy (fun t -> t.Notes)
-            Channels = tracks |> Seq.collect (fun t -> t.Channels) |> Set.ofSeq |> Set.toList }
+            Channels = tracks |> Seq.collect (fun t -> t.Channels) |> Set.ofSeq |> Set.toList
+            Sha256 = ""
+            Split = None }
   with ex ->
     Error ex.Message
 
@@ -198,3 +210,100 @@ let parseStream (b: byte[]) : (string * Result<MidiInfo, string>) list =
       i <- i + 1
 
   List.ofSeq acc
+
+// ---------------------------------------------------------------- freshness
+
+/// What `ls -le` says about a file. The mtime has seconds and the year, and every
+/// write moves it: size + mtime tell whether a cached reading is still the file.
+type FileStat = { Size: int64; Mtime: string }
+
+/// `ls -le <dir>/`: full timestamps (BusyBox 1.00 has no --full-time and no md5sum/cksum).
+let statCommand (dir: string) =
+  let q (s: string) = "'" + s.Replace("'", "'\\''") + "'"
+  let slashed = dir.TrimEnd('/') + "/"
+  "ls -le " + q slashed
+
+/// "-rwxrwxrwx 1 root root 9765 Fri Jul 3 08:21:33 2026 name" (for a single file, name is its path)
+let parseStat (output: string) : Map<string, FileStat> =
+  output.Split '\n'
+  |> Array.choose (fun l ->
+    let f = l.Trim().Split([| ' '; '\t' |], StringSplitOptions.RemoveEmptyEntries)
+
+    // perms links user group size | Fri Jul 3 08:21:33 2026 | name...
+    if l.StartsWith "-" && f.Length >= 11 then
+      Some(String.Join(" ", f[10..]), { Size = int64 f[4]; Mtime = String.Join(" ", f[5..9]) })
+    else
+      None)
+  |> Map.ofArray
+
+let sha256 (bytes: byte[]) =
+  Security.Cryptography.SHA256.HashData bytes |> Convert.ToHexString |> fun s -> s.ToLowerInvariant()
+
+// ---------------------------------------------------------------- on-board tool
+
+/// One line of `midi-info-board` (tools/midi-split-board): the board parses the file
+/// itself and sends back what is shown. Returns the file name, its size and the reading.
+///   I size=N ms=N fmt=N tracks=N ppq=N end=N ch=0xHHHH notes=N tempos=N tempo=N sig=N/N dur=N
+///     [split=ch:N,mlen:N,msha:HEX[,own:ok|bad]] [sha=HEX] name=NAME
+///   E err=KIND size=N name=NAME
+let parseBoardLine (line: string) : (string * int64 * Result<MidiInfo, string>) option =
+  let at = line.IndexOf " name="
+
+  if not (line.StartsWith "I " || line.StartsWith "E ") || at < 0 then
+    None
+  else
+    let name = line.Substring(at + 6)
+    let kv =
+      line.Substring(2, at - 2).Split(' ', StringSplitOptions.RemoveEmptyEntries)
+      |> Array.choose (fun t ->
+        let i = t.IndexOf '='
+        if i > 0 then Some(t.Substring(0, i), t.Substring(i + 1)) else None)
+      |> dict
+
+    let get k = match kv.TryGetValue k with | true, v -> v | _ -> ""
+    let num k = match Int64.TryParse(get k) with | true, v -> v | _ -> 0L
+    let size = num "size"
+
+    if line.StartsWith "E " then
+      Some(name, size, Error(get "err"))
+    else
+      let channels =
+        let mask = Convert.ToInt32((get "ch").Replace("0x", ""), 16)
+        [ for c in 0..15 do if mask &&& (1 <<< c) <> 0 then yield c + 1 ]
+
+      let sigText =
+        match (get "sig").Split '/' with
+        | [| n; d |] -> $"{n}/{d}"
+        | _ -> "4/4"
+
+      let split =
+        match get "split" with
+        | "" -> None
+        | s ->
+          let f = s.Split(',') |> Array.choose (fun p -> match p.Split(':') with | [| k; v |] -> Some(k, v) | _ -> None) |> dict
+          let g k = match f.TryGetValue k with | true, v -> v | _ -> ""
+          Some
+            { Channel = (match Int32.TryParse(g "ch") with | true, v -> v | _ -> 0)
+              MasterLen = (match Int64.TryParse(g "mlen") with | true, v -> v | _ -> 0L)
+              MasterSha = g "msha"
+              OwnOk = (match g "own" with | "ok" -> Some true | "bad" -> Some false | _ -> None) }
+
+      let tempoUs = max 1L (num "tempo")
+
+      Some(
+        name,
+        size,
+        Ok
+          { Name = ""
+            Format = int (num "fmt")
+            Tracks = int (num "tracks")
+            Ppq = int (num "ppq")
+            DurationSec = float (num "dur") / 1000.0
+            Bpm = 60e6 / float tempoUs
+            TempoChanges = int (num "tempos")
+            TimeSig = sigText
+            Notes = int (num "notes")
+            Channels = channels
+            Sha256 = get "sha"
+            Split = split }
+      )

@@ -9,6 +9,7 @@ open Mecaviv.Infrastructure.Logging
 open Mecaviv.Infrastructure.Web
 
 let cfg = Config.load ()
+MidiCache.load ()
 let hub = UdpRelay.Hub cfg.UdpPort
 
 /// One mailbox for every ssh `execute`: serialised per machine, timed, throttled.
