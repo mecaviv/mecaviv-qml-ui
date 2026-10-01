@@ -28,10 +28,9 @@
 
 ```
 SirenConsole/
-├── config.js              # Configuration réseau uniquement
+├── config.js              # Configuration de la console (pupitres, adresses) : seule copie
 ├── webfiles/
-│   ├── server.js          # Serveur Node.js
-│   └── config.js          # Config web
+│   └── server.js          # Serveur Node.js (lit ../config.js, le sert aussi sous /config.js)
 ├── QML/                    # Interface Qt
 └── scripts/
     ├── run.sh             # Démarrage complet
