@@ -60,11 +60,33 @@ Tâches et améliorations futures pour l'ensemble du système mecaviv-qml-ui.
 - [ ] Buffer de messages pour gestion de la latence
 
 ### PureData
+- [ ] Remplacer synthèse + `sirenMidi2Udp` par la bibliothèque Rust `mecaviv` (puredata-abstractions #4, #5)
+  - [x] `composeSiren~` sur `c-siren-udp~` (envoi au parc coupé tant que `route.device` n'est pas revu)
+  - [x] `MidiToSiren.pd` : VST ComposeSiren remplacé par 7 `composeSiren~`
+  - [x] clic du pédalier sur `clic~` (banque clic d'origine / clave)
+  - [ ] `route.device` (UDP / MIDI / DSP) → réglages `parc` / `dsp` des sirènes, puis retirer `sirenMidi2Udp`
+  - [ ] source MIDI du program change du clic
+  - [ ] girophone `M645.pd`
+- [ ] Bibliothèque `mecaviv` : par le `mecaviv-bridge-daemon` (mecaviv-rs), envoi direct aux cartes sinon
+  - [x] build Linux arm64 pour les Pi depuis le Mac (`make linux`)
+  - [ ] daemon joignable depuis plusieurs Pi (aujourd'hui socket local seulement) — à voir avec Gauthier
+  - [ ] session matériel : samples du pchit, pavillon vélocité 0 (note on V1 / note off de pavillonSend), test réel
+  - [ ] DSP du pchit à partir des samples
 - [ ] Patch PureData centralisé pour router-client
 - [ ] Communication bidirectionnelle complète avec sirenRouter
 - [ ] Gestion des autorisations de contrôle (takeover)
 - [ ] Support MIDI multi-sources (Reaper, Sirénium, Pupitres)
 - [ ] Routage conditionnel selon priorité
+
+### Boîtier clic (Pi 5) — firmwares-artila
+- [x] `clic-rs` étape 1 : remplace `clic.c` (firmwares-artila #5)
+- [ ] port du clic sur le boîtier : `m_seqPi2` envoie sur 4006, `clic.c` écoute 8888
+- [ ] étape 2 : séquenceur `m_seqPi2` en Rust userland sur `m_seq/rs`, sans module noyau
+- [ ] test final : DSP et clic comparés aux anciennes applications (données sirènes corrigées de `feat/siren-udp-bridge`)
+
+### ComposeSiren (virtual instrument)
+- [ ] Ajouter le pchit
+- [ ] Interface de chorégraphie des pavillons (lumières bacier / frinox)
 
 ### Monitoring Global
 - [ ] Tableau de bord centralisé (dashboard unifié)
