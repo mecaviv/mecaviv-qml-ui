@@ -11,6 +11,8 @@
     <ProjectReference Include="..\..\Infrastructure\Infrastructure.fsproj" />
     <ProjectReference Include="..\..\Shared\Shared.fsproj" />
     <Compile Include="Presets.fs" />
+    <Compile Include="ConsoleConfig.fs" />
+    <Compile Include="UiSocket.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <Import Project="..\..\.paket\Paket.Restore.targets" />
