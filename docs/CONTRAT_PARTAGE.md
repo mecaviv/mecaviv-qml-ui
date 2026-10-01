@@ -260,10 +260,17 @@ Découpage proposé, un module par canal plutôt qu'un catalogue global :
 4. le projet `Shared` lui-même, avec des tests octet par octet contre des captures réelles.
 
 **Décisions (octobre 2026).** Interfaces web en **Fable + Feliz** (React) + Elmish. **SirenePupitre
-garde QML** : ses jeux demandent la souplesse graphique de QML. L'architecture est donc mixte :
-serveurs en F# partout, clients Fable/Feliz là où ça simplifie, QML pour le pupitre. Le contrat est
+et pedalierSirenium gardent QML** : les jeux du pupitre, et l'état des boucles et de l'harmonie du
+pédalier, demandent des animations riches, le point fort de QML. L'architecture est donc mixte :
+serveurs en F# partout, clients Fable/Feliz là où ça simplifie (SirenConsole d'abord), QML pour le
+pupitre et le pédalier.
+
+Note pour plus tard : en WebAssembly, Qt Quick dessine déjà **à travers WebGL** ; le poids vient du
+runtime Qt (≈ 26 Mo de `.wasm` pour SirenConsole), pas de WebGL. Une alternative se jugerait sur
+mesure, sur le Pi : une animation du pédalier refaite en SVG/CSS (ou Canvas, ou PixiJS) contre QML
+— images par seconde, CPU, temps de démarrage. Le contrat est
 la frontière entre les deux : `Shared` produira des exemples de messages et des tests pour que le
-QML du pupitre et le F# restent d'accord.
+QML (pupitre, pédalier) et le F# restent d'accord.
 
 **App pilote pour Fable : SirenConsole** — l'interface la plus simple (listes, formulaires,
 réglages, pas de dessin temps réel), et le plus gros serveur Node à porter : le pilote valide les
