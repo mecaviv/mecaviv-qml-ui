@@ -399,8 +399,8 @@ Rectangle {
     //   "trampresence:N"  → check based on sirenOnline[N-1] (artila S1-S7 + Trompe)
     //   "always"          → pre-check by default (raspberry-clic, voitures, pavillons —
     //                       no live ping for them, user unchecks if not needed)
-    // Raspberry Clic = m_seqPi5 firmware (Pi2 deployment is obsolete).
-    // See firmwares-artila/m_seqPi5/m_seqPi2/m_seq/seq.h:85.
+    // Raspberry Clic = m_seq/pi5 firmware (Pi2 deployment is obsolete).
+    // See firmwares-artila/m_seq/pi5/seq.h:85.
     readonly property var syncTargets: [
         { machineType: 2,  name: "S1",         liveness: "trampresence:1" },
         { machineType: 3,  name: "S2",         liveness: "trampresence:2" },
