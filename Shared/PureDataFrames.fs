@@ -15,17 +15,17 @@ type PureDataFrame =
     /// 0x01, 10 bytes: flags (bit 0 = playing), bar u16, beat in bar u16, beat f32.
     | Position of playing: bool * bar: int * beatInBar: int * beat: float
     /// 0x02, 10 bytes: duration u32 (ms), total beats u32.
-    | FileInfo of durationMs: int64 * totalBeats: int64
+    | FileInfo of durationMs: float * totalBeats: float
     /// 0x03, 3 bytes: tempo u16 (BPM).
     | Tempo of bpm: int
     /// 0x04, 3 bytes: numerator, denominator.
     | TimeSignature of numerator: int * denominator: int
     /// 0x06, 6 or 8 bytes: flags, tick u32, optional ppq u16.
-    | TickPosition of playing: bool * tick: int64 * ppq: int option
+    | TickPosition of playing: bool * tick: float * ppq: int option
     /// A whole JSON text: raw (starting with '{'), or 0x02 followed by JSON (more than 100 bytes).
     | Json of text: string
     /// Part of a configuration sent in chunks: total size u32, position u32, then the bytes.
-    | ConfigChunk of totalSize: int64 * position: int64 * data: byte[]
+    | ConfigChunk of totalSize: int * position: int * data: byte[]
     | Unknown of byte[]
 
 let private u16 (b: byte[]) i = int b.[i] ||| (int b.[i + 1] <<< 8)
@@ -50,6 +50,10 @@ let private utf8 (b: byte[]) (start: int) =
 
 let private maxConfigSize = 10L * 1024L * 1024L
 
+/// u32 values as float: exact up to 2^53, and a plain number in JavaScript (int64 would be a
+/// BigInt with Fable).
+let private u32f (b: byte[]) i = float (u32 b i)
+
 let decode (b: byte[]) : PureDataFrame =
     let len = b.Length
     if len = 0 then Unknown b
@@ -59,14 +63,15 @@ let decode (b: byte[]) : PureDataFrame =
     else
         match b.[0], len with
         | 0x01uy, 10 -> Position(b.[1] &&& 1uy = 1uy, u16 b 2, u16 b 4, f32 b 6)
-        | 0x02uy, 10 -> FileInfo(u32 b 2, u32 b 6)
+        | 0x02uy, 10 -> FileInfo(u32f b 2, u32f b 6)
         | 0x02uy, n when n > 100 && b.[1] = 0x7Buy -> Json(utf8 b 1)
         | 0x03uy, 3 -> Tempo(u16 b 1)
         | 0x04uy, 3 -> TimeSignature(int b.[1], int b.[2])
-        | 0x06uy, (6 | 8) -> TickPosition(b.[1] &&& 1uy = 1uy, u32 b 2, (if len = 8 then Some(u16 b 6) else None))
+        | 0x06uy, (6 | 8) -> TickPosition(b.[1] &&& 1uy = 1uy, u32f b 2, (if len = 8 then Some(u16 b 6) else None))
         | _ when len >= 8 ->
             let total = u32 b 0
             let position = u32 b 4
-            if total > 0L && total <= maxConfigSize && position < total then ConfigChunk(total, position, Array.sub b 8 (len - 8))
+            if total > 0L && total <= maxConfigSize && position < total then
+                ConfigChunk(int total, int position, Array.sub b 8 (len - 8))
             else Unknown b
         | _ -> Unknown b

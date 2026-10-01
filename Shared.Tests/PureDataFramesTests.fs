@@ -20,10 +20,10 @@ let tests =
         }
         test "a configuration chunk is still a chunk" {
             let json = System.Text.Encoding.UTF8.GetBytes """{"type":"CONFIG_FULL","config":{}}"""
-            let total = int64 json.Length
+            let total = json.Length
             let header = Array.concat [ System.BitConverter.GetBytes(uint32 total); System.BitConverter.GetBytes 0u ]
             match decode (Array.append header json) with
-            | ConfigChunk(t, 0L, data) -> Expect.equal (t, data) (total, json) ""
+            | ConfigChunk(t, 0, data) -> Expect.equal (t, data) (total, json) ""
             | other -> failtest $"%A{other}"
         }
         test "the wheel: SS, pitch bend big-endian" {
@@ -32,9 +32,9 @@ let tests =
         test "short frames by code and length" {
             Expect.equal (decode [| 0x03uy; 96uy; 0uy |]) (Tempo 96) "tempo"
             Expect.equal (decode [| 0x04uy; 6uy; 8uy |]) (TimeSignature(6, 8)) "time signature"
-            Expect.equal (decode [| 0x06uy; 1uy; 0x10uy; 0x27uy; 0uy; 0uy |]) (TickPosition(true, 10000L, None)) "ticks"
-            Expect.equal (decode [| 0x06uy; 0uy; 0x10uy; 0x27uy; 0uy; 0uy; 0xE0uy; 0x01uy |]) (TickPosition(false, 10000L, Some 480)) "ticks + ppq"
-            Expect.equal (decode [| 0x02uy; 0uy; 0x10uy; 0x27uy; 0uy; 0uy; 64uy; 0uy; 0uy; 0uy |]) (FileInfo(10000L, 64L)) "file info"
+            Expect.equal (decode [| 0x06uy; 1uy; 0x10uy; 0x27uy; 0uy; 0uy |]) (TickPosition(true, 10000.0, None)) "ticks"
+            Expect.equal (decode [| 0x06uy; 0uy; 0x10uy; 0x27uy; 0uy; 0uy; 0xE0uy; 0x01uy |]) (TickPosition(false, 10000.0, Some 480)) "ticks + ppq"
+            Expect.equal (decode [| 0x02uy; 0uy; 0x10uy; 0x27uy; 0uy; 0uy; 64uy; 0uy; 0uy; 0uy |]) (FileInfo(10000.0, 64.0)) "file info"
             Expect.equal (decode [| 0uy; 0uy |]) Heartbeat "heartbeat"
         }
         test "the pupitre's 5-byte 0x04 (note + duration) is not a time signature" {
