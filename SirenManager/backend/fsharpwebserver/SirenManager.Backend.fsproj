@@ -12,6 +12,9 @@
   <ItemGroup>
     <Compile Include="Config.fs" />
     <Compile Include="SshProxy.fs" />
+    <Compile Include="Protocol.fs" />
+    <Compile Include="Midi.fs" />
+    <Compile Include="Scheduler.fs" />
     <Compile Include="UdpRelay.fs" />
     <Compile Include="Api.fs" />
     <Compile Include="Program.fs" />

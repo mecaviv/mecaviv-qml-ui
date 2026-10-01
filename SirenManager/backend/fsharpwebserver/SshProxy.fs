@@ -27,7 +27,7 @@ let globToRegex glob =
   Regex("^" + escaped + "$", RegexOptions.IgnoreCase ||| RegexOptions.CultureInvariant)
 
 /// OpenSSH argv, unchanged. CliWrap replaces Process.
-let runBytes label sshTarget remoteCommand stdin =
+let runBytesQ (quiet: bool) label sshTarget remoteCommand stdin =
   task {
     use stdoutBytes = new MemoryStream()
     let stderrText = StringBuilder()
@@ -36,6 +36,8 @@ let runBytes label sshTarget remoteCommand stdin =
       match stdin with
       | Some bytes -> ReadFrom.bytes bytes
       | None -> ReadFrom.devnull
+
+    let sw = System.Diagnostics.Stopwatch.StartNew()
 
     let! result =
       command "ssh" {
@@ -68,7 +70,8 @@ let runBytes label sshTarget remoteCommand stdin =
       | Some inputBytes -> $"ssh {sshTarget} {remoteCommand} < {inputBytes.Length} bytes"
       | None -> $"ssh {sshTarget} {remoteCommand}"
 
-    trace shown result.ExitCode (Some bytes) stderr
+    if not quiet then
+      traceTimed shown result.ExitCode sw.ElapsedMilliseconds (Some bytes) stderr
 
     if result.ExitCode <> 0 then
       let detail =
@@ -83,6 +86,15 @@ let runBytes label sshTarget remoteCommand stdin =
       raise (SshError $"{label} exited {result.ExitCode}: {detail}")
 
     return bytes
+  }
+
+let runBytes label sshTarget remoteCommand stdin = runBytesQ false label sshTarget remoteCommand stdin
+
+/// Same as `execute` but without the per-command log lines: for batches, which log one summary.
+let executeQuiet cfg machineType command =
+  task {
+    let! bytes = runBytesQ true "ssh" (target cfg machineType) command None
+    return Encoding.UTF8.GetString bytes
   }
 
 let execute cfg machineType command =
