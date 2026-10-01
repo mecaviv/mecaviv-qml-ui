@@ -364,8 +364,18 @@ class PureDataProxy {
             }
         }
 
-        // Protocole strict SirenePupitre: header 8 octets (LE) + payload JSON chunk
-        if (buffer.length >= 8) {
+        // Protocole strict SirenePupitre: header 8 octets (LE) + payload JSON chunk.
+        // Les trames connues de taille fixe passent d'abord : sans ça, une POSITION de 10 octets
+        // (0x01, flags, mesure, temps...) a un en-tête de morceau plausible et était avalée
+        // comme morceau de config (mesuré : mesures 5, 1 et 0 perdues).
+        const len = buffer.length;
+        const knownFixedFrame =
+            (buffer[0] === 0x01 && len === 10) ||
+            (buffer[0] === 0x02 && len === 10) ||
+            (buffer[0] === 0x03 && len === 3) ||
+            (buffer[0] === 0x04 && len === 3) ||
+            (buffer[0] === 0x06 && (len === 6 || len === 8));
+        if (len >= 8 && !knownFixedFrame) {
             const totalSize = buffer.readUInt32LE(0);
             const position  = buffer.readUInt32LE(4);
             const payload   = buffer.slice(8);
