@@ -37,6 +37,8 @@ module JsonValue =
         match v with
         | JNull -> Encode.nil
         | JBool b -> Encode.bool b
+        // Integers are written as integers (1, not 1.0), as JavaScript does.
+        | JNumber n when n = floor n && abs n <= 2147483647.0 -> Encode.int (int n)
         | JNumber n -> Encode.float n
         | JString s -> Encode.string s
         | JArray items -> items |> List.map encode |> Encode.list

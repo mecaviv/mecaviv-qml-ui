@@ -1,0 +1,652 @@
+[
+  {
+    "preset": "preset_001",
+    "pupitreId": "P1",
+    "updates": [
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "sirenConfig",
+          "currentSirens"
+        ],
+        "value": [],
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "outputConfig",
+          "vstEnabled"
+        ],
+        "value": 0,
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "outputConfig",
+          "udpEnabled"
+        ],
+        "value": 0,
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "outputConfig",
+          "rtpMidiEnabled"
+        ],
+        "value": 0,
+        "source": "console"
+      }
+    ]
+  },
+  {
+    "preset": "preset_001",
+    "pupitreId": "P2",
+    "updates": [
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "sirenConfig",
+          "currentSirens"
+        ],
+        "value": [
+          3
+        ],
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "sirenConfig",
+          "sirens",
+          0,
+          "frettedMode",
+          "enabled"
+        ],
+        "value": 1,
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "sirenConfig",
+          "sirens",
+          1,
+          "frettedMode",
+          "enabled"
+        ],
+        "value": 1,
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "sirenConfig",
+          "sirens",
+          2,
+          "frettedMode",
+          "enabled"
+        ],
+        "value": 1,
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "sirenConfig",
+          "sirens",
+          3,
+          "frettedMode",
+          "enabled"
+        ],
+        "value": 1,
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "sirenConfig",
+          "sirens",
+          4,
+          "frettedMode",
+          "enabled"
+        ],
+        "value": 1,
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "sirenConfig",
+          "sirens",
+          5,
+          "frettedMode",
+          "enabled"
+        ],
+        "value": 1,
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "sirenConfig",
+          "sirens",
+          6,
+          "frettedMode",
+          "enabled"
+        ],
+        "value": 1,
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "outputConfig",
+          "vstEnabled"
+        ],
+        "value": 0,
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "outputConfig",
+          "udpEnabled"
+        ],
+        "value": 0,
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "outputConfig",
+          "rtpMidiEnabled"
+        ],
+        "value": 0,
+        "source": "console"
+      }
+    ]
+  },
+  {
+    "preset": "preset_001",
+    "pupitreId": "P3",
+    "updates": [
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "sirenConfig",
+          "currentSirens"
+        ],
+        "value": [],
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "outputConfig",
+          "vstEnabled"
+        ],
+        "value": 0,
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "outputConfig",
+          "udpEnabled"
+        ],
+        "value": 0,
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "outputConfig",
+          "rtpMidiEnabled"
+        ],
+        "value": 0,
+        "source": "console"
+      }
+    ]
+  },
+  {
+    "preset": "preset_001",
+    "pupitreId": "P4",
+    "updates": [
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "sirenConfig",
+          "currentSirens"
+        ],
+        "value": [
+          4
+        ],
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "sirenConfig",
+          "sirens",
+          0,
+          "frettedMode",
+          "enabled"
+        ],
+        "value": 1,
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "sirenConfig",
+          "sirens",
+          1,
+          "frettedMode",
+          "enabled"
+        ],
+        "value": 0,
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "sirenConfig",
+          "sirens",
+          2,
+          "frettedMode",
+          "enabled"
+        ],
+        "value": 0,
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "sirenConfig",
+          "sirens",
+          3,
+          "frettedMode",
+          "enabled"
+        ],
+        "value": 0,
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "sirenConfig",
+          "sirens",
+          4,
+          "frettedMode",
+          "enabled"
+        ],
+        "value": 0,
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "sirenConfig",
+          "sirens",
+          5,
+          "frettedMode",
+          "enabled"
+        ],
+        "value": 0,
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "sirenConfig",
+          "sirens",
+          6,
+          "frettedMode",
+          "enabled"
+        ],
+        "value": 0,
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "outputConfig",
+          "vstEnabled"
+        ],
+        "value": 0,
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "outputConfig",
+          "udpEnabled"
+        ],
+        "value": 0,
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "outputConfig",
+          "rtpMidiEnabled"
+        ],
+        "value": 0,
+        "source": "console"
+      }
+    ]
+  },
+  {
+    "preset": "preset_001",
+    "pupitreId": "P5",
+    "updates": [
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "sirenConfig",
+          "currentSirens"
+        ],
+        "value": [],
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "outputConfig",
+          "vstEnabled"
+        ],
+        "value": 0,
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "outputConfig",
+          "udpEnabled"
+        ],
+        "value": 0,
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "outputConfig",
+          "rtpMidiEnabled"
+        ],
+        "value": 0,
+        "source": "console"
+      }
+    ]
+  },
+  {
+    "preset": "preset_001",
+    "pupitreId": "P6",
+    "updates": [
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "sirenConfig",
+          "currentSirens"
+        ],
+        "value": [],
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "outputConfig",
+          "vstEnabled"
+        ],
+        "value": 0,
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "outputConfig",
+          "udpEnabled"
+        ],
+        "value": 0,
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "outputConfig",
+          "rtpMidiEnabled"
+        ],
+        "value": 0,
+        "source": "console"
+      }
+    ]
+  },
+  {
+    "preset": "preset_001",
+    "pupitreId": "P7",
+    "updates": [
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "sirenConfig",
+          "currentSirens"
+        ],
+        "value": [],
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "outputConfig",
+          "vstEnabled"
+        ],
+        "value": 0,
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "outputConfig",
+          "udpEnabled"
+        ],
+        "value": 0,
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "outputConfig",
+          "rtpMidiEnabled"
+        ],
+        "value": 0,
+        "source": "console"
+      }
+    ]
+  },
+  {
+    "preset": "preset_001",
+    "pupitreId": "P9",
+    "updates": []
+  },
+  {
+    "preset": "preset_002",
+    "pupitreId": "P1",
+    "updates": [
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "sirenConfig",
+          "currentSirens"
+        ],
+        "value": [
+          1
+        ],
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "outputConfig",
+          "vstEnabled"
+        ],
+        "value": 0,
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "outputConfig",
+          "udpEnabled"
+        ],
+        "value": 1,
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "outputConfig",
+          "rtpMidiEnabled"
+        ],
+        "value": 0,
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "controllerMapping",
+          "joystickX",
+          "cc"
+        ],
+        "value": 10,
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "controllerMapping",
+          "joystickX",
+          "curve"
+        ],
+        "value": "parabolic",
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "controllerMapping",
+          "joystickY",
+          "cc"
+        ],
+        "value": 11,
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "controllerMapping",
+          "joystickY",
+          "curve"
+        ],
+        "value": "hyperbolic",
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "controllerMapping",
+          "fader",
+          "cc"
+        ],
+        "value": 12,
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "controllerMapping",
+          "fader",
+          "curve"
+        ],
+        "value": "linear",
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "controllerMapping",
+          "selector",
+          "cc"
+        ],
+        "value": 13,
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "controllerMapping",
+          "selector",
+          "curve"
+        ],
+        "value": "s curve",
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "controllerMapping",
+          "pedalId",
+          "cc"
+        ],
+        "value": 14,
+        "source": "console"
+      },
+      {
+        "type": "PARAM_UPDATE",
+        "path": [
+          "controllerMapping",
+          "pedalId",
+          "curve"
+        ],
+        "value": "linear",
+        "source": "console"
+      }
+    ]
+  },
+  {
+    "preset": "preset_002",
+    "pupitreId": "P2",
+    "updates": []
+  },
+  {
+    "preset": "preset_002",
+    "pupitreId": "P3",
+    "updates": []
+  },
+  {
+    "preset": "preset_002",
+    "pupitreId": "P4",
+    "updates": []
+  },
+  {
+    "preset": "preset_002",
+    "pupitreId": "P5",
+    "updates": []
+  },
+  {
+    "preset": "preset_002",
+    "pupitreId": "P6",
+    "updates": []
+  },
+  {
+    "preset": "preset_002",
+    "pupitreId": "P7",
+    "updates": []
+  },
+  {
+    "preset": "preset_002",
+    "pupitreId": "P9",
+    "updates": []
+  }
+]

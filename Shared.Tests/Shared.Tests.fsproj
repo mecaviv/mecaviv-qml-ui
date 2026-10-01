@@ -10,10 +10,12 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Shared\Shared.fsproj" />
+    <Compile Include="TestJson.fs" />
     <Compile Include="JsonTests.fs" />
     <Compile Include="ConsoleTests.fs" />
     <Compile Include="ConfigTests.fs" />
     <Compile Include="PureDataFramesTests.fs" />
+    <Compile Include="PresetSyncTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <Import Project="..\.paket\Paket.Restore.targets" />

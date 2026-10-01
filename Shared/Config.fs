@@ -86,58 +86,134 @@ module Siren =
     let ofPupitreConfig: Decoder<Siren list> = Decode.at [ "sirenConfig"; "sirens" ] (Decode.list decoder)
 
 // ─────────────────────────────── presets ───────────────────────────────
+//
+// Every known field is optional, as in the JS (`!== undefined`): an absent setting is not a
+// false one, and the conversions to PARAM_UPDATE skip it. Unknown fields are kept in Extra, so
+// that the F# server can rewrite presets.json without losing anything.
 
-/// One pupitre in a console preset. Its controller mapping concerns the pads and joystick,
-/// being redesigned: kept as is.
+/// A boolean as the console writes it (`value ? true : false`), also read from 0 / 1.
+let private flag: Decoder<bool> =
+    Decode.oneOf [ Decode.bool; Decode.map (fun (n: float) -> n <> 0.0) Decode.float ]
+
+/// The fields of an object other than `known`, kept as they are.
+let private extra (known: string list) : Decoder<(string * JsonValue) list> =
+    Decode.keyValuePairs (JsonValue.decoder ())
+    |> Decode.map (List.filter (fun (k, _) -> not (List.contains k known)))
+
+let private encodeExtra (fields: (string * JsonValue) list) =
+    fields |> List.map (fun (k, v) -> k, JsonValue.encode v)
+
+let private opt name (encode: 'a -> IEncodable) (value: 'a option) =
+    match value with
+    | Some v -> [ name, encode v ]
+    | None -> []
+
+/// Per-siren settings of a pupitre in a preset (`sirenes.sireneN`).
+type SireneSettings =
+    { AmbitusRestricted: bool option
+      FrettedMode: bool option
+      Extra: (string * JsonValue) list }
+
+/// A controller mapping (`controllerMapping.<control>`): pads and joystick, being redesigned.
+type ControllerSetting =
+    { Cc: int option
+      Curve: string option
+      Extra: (string * JsonValue) list }
+
+/// One pupitre in a console preset (`config.pupitres[]`).
 type PresetPupitre =
     { Id: string
-      AssignedSirenes: int list
-      VstEnabled: bool
-      UdpEnabled: bool
-      RtpMidiEnabled: bool
-      ControllerMapping: JsonValue option
-      Sirenes: JsonValue option }
+      AssignedSirenes: int list option
+      VstEnabled: bool option
+      UdpEnabled: bool option
+      RtpMidiEnabled: bool option
+      GameMode: bool option
+      /// `sirene1`, `sirene2`… in file order.
+      Sirenes: (string * SireneSettings) list option
+      /// Control name (`joystickX`, `fader`…) in file order.
+      ControllerMapping: (string * ControllerSetting) list option
+      Extra: (string * JsonValue) list }
 
 type Preset =
     { Id: string
-      Name: string
-      Description: string
+      Name: string option
+      Description: string option
       Created: string option
       Modified: string option
-      Version: string
+      Version: string option
       Pupitres: PresetPupitre list
       /// The rest of `config`, kept as is.
-      OtherConfig: (string * JsonValue) list }
+      OtherConfig: (string * JsonValue) list
+      Extra: (string * JsonValue) list }
 
 type PresetsFile = { Presets: Preset list }
 
+module SireneSettings =
+    let decoder: Decoder<SireneSettings> =
+        Decode.object (fun get ->
+            { AmbitusRestricted = get.Optional.Field "ambitusRestricted" flag
+              FrettedMode = get.Optional.Field "frettedMode" flag
+              Extra = get.Required.Raw(extra [ "ambitusRestricted"; "frettedMode" ]) })
+
+    let encode (s: SireneSettings) : IEncodable =
+        Encode.object (
+            opt "ambitusRestricted" Encode.bool s.AmbitusRestricted
+            @ opt "frettedMode" Encode.bool s.FrettedMode
+            @ encodeExtra s.Extra)
+
+module ControllerSetting =
+    let decoder: Decoder<ControllerSetting> =
+        Decode.object (fun get ->
+            { Cc = get.Optional.Field "cc" Decode.int
+              Curve = get.Optional.Field "curve" Decode.string
+              Extra = get.Required.Raw(extra [ "cc"; "curve" ]) })
+
+    let encode (c: ControllerSetting) : IEncodable =
+        Encode.object (opt "cc" Encode.int c.Cc @ opt "curve" Encode.string c.Curve @ encodeExtra c.Extra)
+
 module PresetPupitre =
+    let private known =
+        [ "id"; "assignedSirenes"; "vstEnabled"; "udpEnabled"; "rtpMidiEnabled"; "gameMode"; "sirenes"; "controllerMapping" ]
+
+    let empty id =
+        { Id = id
+          AssignedSirenes = None
+          VstEnabled = None
+          UdpEnabled = None
+          RtpMidiEnabled = None
+          GameMode = None
+          Sirenes = None
+          ControllerMapping = None
+          Extra = [] }
+
     let decoder: Decoder<PresetPupitre> =
         Decode.object (fun get ->
             { Id = get.Required.Field "id" Decode.string
-              AssignedSirenes = get.Optional.Field "assignedSirenes" (Decode.list Siren.numericId) |> Option.defaultValue []
-              VstEnabled = get.Optional.Field "vstEnabled" Decode.bool |> Option.defaultValue false
-              UdpEnabled = get.Optional.Field "udpEnabled" Decode.bool |> Option.defaultValue false
-              RtpMidiEnabled = get.Optional.Field "rtpMidiEnabled" Decode.bool |> Option.defaultValue false
-              ControllerMapping = get.Optional.Field "controllerMapping" (JsonValue.decoder ())
-              Sirenes = get.Optional.Field "sirenes" (JsonValue.decoder ()) })
+              AssignedSirenes = get.Optional.Field "assignedSirenes" (Decode.list Siren.numericId)
+              VstEnabled = get.Optional.Field "vstEnabled" flag
+              UdpEnabled = get.Optional.Field "udpEnabled" flag
+              RtpMidiEnabled = get.Optional.Field "rtpMidiEnabled" flag
+              GameMode = get.Optional.Field "gameMode" flag
+              Sirenes = get.Optional.Field "sirenes" (Decode.keyValuePairs SireneSettings.decoder)
+              ControllerMapping = get.Optional.Field "controllerMapping" (Decode.keyValuePairs ControllerSetting.decoder)
+              Extra = get.Required.Raw(extra known) })
 
     let encode (p: PresetPupitre) : IEncodable =
-        Encode.object [
-            "id", Encode.string p.Id
-            "assignedSirenes", p.AssignedSirenes |> List.map Encode.int |> Encode.list
-            "vstEnabled", Encode.bool p.VstEnabled
-            "udpEnabled", Encode.bool p.UdpEnabled
-            "rtpMidiEnabled", Encode.bool p.RtpMidiEnabled
-            match p.ControllerMapping with
-            | Some m -> "controllerMapping", JsonValue.encode m
-            | None -> ()
-            match p.Sirenes with
-            | Some s -> "sirenes", JsonValue.encode s
-            | None -> ()
-        ]
+        let pairs encode (items: (string * 'a) list) = items |> List.map (fun (k, v) -> k, encode v) |> Encode.object
+        Encode.object (
+            [ "id", Encode.string p.Id ]
+            @ opt "assignedSirenes" (List.map Encode.int >> Encode.list) p.AssignedSirenes
+            @ opt "vstEnabled" Encode.bool p.VstEnabled
+            @ opt "udpEnabled" Encode.bool p.UdpEnabled
+            @ opt "rtpMidiEnabled" Encode.bool p.RtpMidiEnabled
+            @ opt "controllerMapping" (pairs ControllerSetting.encode) p.ControllerMapping
+            @ opt "sirenes" (pairs SireneSettings.encode) p.Sirenes
+            @ opt "gameMode" Encode.bool p.GameMode
+            @ encodeExtra p.Extra)
 
 module Preset =
+    let private known = [ "id"; "name"; "description"; "created"; "modified"; "version"; "pupitres"; "config" ]
+
     /// One format, the pupitres in `config.pupitres`. The old format had them at the root of the
     /// preset: they are used only when `config.pupitres` is missing, as normalizePreset does in
     /// SirenConsole/webfiles/api-presets.js.
@@ -147,31 +223,28 @@ module Preset =
             let inConfig = get.Optional.At [ "config"; "pupitres" ] (Decode.list PresetPupitre.decoder)
             let atRoot = get.Optional.Field "pupitres" (Decode.list PresetPupitre.decoder)
             { Id = get.Required.Field "id" Decode.string
-              Name = get.Optional.Field "name" Decode.string |> Option.defaultValue ""
-              Description = get.Optional.Field "description" Decode.string |> Option.defaultValue ""
+              Name = get.Optional.Field "name" Decode.string
+              Description = get.Optional.Field "description" Decode.string
               Created = get.Optional.Field "created" Decode.string
               Modified = get.Optional.Field "modified" Decode.string
-              Version = get.Optional.Field "version" Decode.string |> Option.defaultValue "1.0"
+              Version = get.Optional.Field "version" Decode.string
               Pupitres = inConfig |> Option.orElse atRoot |> Option.defaultValue []
-              OtherConfig = config |> List.filter (fun (k, _) -> k <> "pupitres") })
+              OtherConfig = config |> List.filter (fun (k, _) -> k <> "pupitres")
+              Extra = get.Required.Raw(extra known) })
 
     let encode (p: Preset) : IEncodable =
-        Encode.object [
-            "id", Encode.string p.Id
-            "name", Encode.string p.Name
-            "description", Encode.string p.Description
-            match p.Created with
-            | Some c -> "created", Encode.string c
-            | None -> ()
-            match p.Modified with
-            | Some m -> "modified", Encode.string m
-            | None -> ()
-            "version", Encode.string p.Version
-            "config",
-            Encode.object (
-                ("pupitres", p.Pupitres |> List.map PresetPupitre.encode |> Encode.list)
-                :: (p.OtherConfig |> List.map (fun (k, v) -> k, JsonValue.encode v)))
-        ]
+        Encode.object (
+            [ "id", Encode.string p.Id ]
+            @ opt "name" Encode.string p.Name
+            @ opt "description" Encode.string p.Description
+            @ opt "created" Encode.string p.Created
+            @ opt "modified" Encode.string p.Modified
+            @ opt "version" Encode.string p.Version
+            @ [ "config",
+                Encode.object (
+                    ("pupitres", p.Pupitres |> List.map PresetPupitre.encode |> Encode.list)
+                    :: encodeExtra p.OtherConfig) ]
+            @ encodeExtra p.Extra)
 
 module PresetsFile =
     let decoder: Decoder<PresetsFile> =
