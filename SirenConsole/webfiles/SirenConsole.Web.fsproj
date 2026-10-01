@@ -13,6 +13,7 @@
     <Compile Include="Presets.fs" />
     <Compile Include="ConsoleConfig.fs" />
     <Compile Include="UiSocket.fs" />
+    <Compile Include="PupitreLinks.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <Import Project="..\..\.paket\Paket.Restore.targets" />

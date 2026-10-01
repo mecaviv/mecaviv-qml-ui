@@ -8,8 +8,8 @@ open Mecaviv.Infrastructure.Logging
 open Mecaviv.Infrastructure.Web
 
 /// SirenConsole's server, port 8001: the WebAssembly build, and what is ported from
-/// server.js so far: the presets, /api/config and the UI's WebSocket /ws. The other routes
-/// still answer "port-in-progress" (server.js).
+/// server.js so far: the presets, /api/config, the UI's WebSocket /ws and the links to the
+/// pupitres. The other routes still answer "port-in-progress" (server.js).
 /// SIRENCONSOLE_PORT and SIRENCONSOLE_PRESETS override the port and presets.json (tests).
 
 [<EntryPoint>]
@@ -34,13 +34,42 @@ let main _ =
   let presets = Presets.Store presetsFile
   let sync = UiSocket.SyncState()
   let hub = UiSocket.Hub()
-  let status = UiSocket.configuredOnly pupitres
+  let nowMs () = float (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
 
-  // PARAM_UPDATE for synced pupitres: sent once the pupitre links are ported.
+  // What the pupitres send (handlePupitreConfigFromPupitre, handleParamChangedFromPupitre).
+  let handlers: PupitreLinks.Handlers =
+    { Config =
+        fun id data ->
+          task {
+            if not (sync.IsSynced id) then
+              do! hub.Send(sync.Set(id, true))
+            let! changed = Presets.updateFromPupitre presets id (Presets.mergePupitreConfig data)
+            if changed then
+              do! hub.Send(Mecaviv.Shared.Console.PresetUpdatedFromPupitre(id, None, nowMs ()))
+          }
+      ParamChanged =
+        fun id path value ->
+          task {
+            if sync.IsSynced id then
+              let apply (entry: Mecaviv.Shared.Config.PresetPupitre) =
+                let preset: Mecaviv.Shared.Config.Preset =
+                  { Id = ""; Name = None; Description = None; Created = None; Modified = None; Version = None
+                    Pupitres = [ entry ]; OtherConfig = []; Extra = [] }
+                (Mecaviv.Shared.PresetSync.applyParamUpdate path value id preset).Pupitres.Head
+              let! changed = Presets.updateFromPupitre presets id apply
+              if changed then
+                do! hub.Send(Mecaviv.Shared.Console.PresetUpdatedFromPupitre(id, Some(path, value), nowMs ()))
+          }
+      Ui = fun event -> hub.Send event }
+
+  let links = PupitreLinks.Links(pupitres, handlers)
+  let status = links :> UiSocket.PupitreStatusSource
+
+  // PARAM_UPDATE for synced pupitres, through their links.
   let link =
     { new Presets.PupitreLink with
         member _.IsSynced id = sync.IsSynced id
-        member _.Send _ _ = () }
+        member _.Send id message = links.Send(id, message) |> ignore }
 
   run
     { LogLevel = "Debug"
@@ -50,7 +79,8 @@ let main _ =
       info $"SirenConsole listening on http://0.0.0.0:{port}/ ({root})"
       info $"presets: {presetsFile}"
       info $"config: {configFile}, {pupitres.Length} pupitre(s)"
-      info "PureData, MIDI and pupitre routes are still served by server.js")
+      info "MIDI routes are still served by server.js"
+      links.Start())
     (fun builder -> builder.Services.AddGiraffe() |> ignore)
     (useStaticSiteWithApi
       (fun app ->

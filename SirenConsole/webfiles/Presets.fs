@@ -475,3 +475,116 @@ let routes (store: Store) (link: PupitreLink) : HttpHandler =
         PUT >=> routef "/api/presets/%s" (update store)
         DELETE >=> routef "/api/presets/%s" (delete store)
     ]
+
+// ─────────────────────────────── from a pupitre ───────────────────────────────
+
+let private member' name (v: JsonValue) =
+    match v with
+    | JObject fields -> fields |> List.tryFind (fun (k, _) -> k = name) |> Option.map snd
+    | _ -> None
+
+let private path (names: string list) (v: JsonValue) =
+    names |> List.fold (fun acc n -> acc |> Option.bind (member' n)) (Some v)
+
+let private sirenNumbers (v: JsonValue option) =
+    match v with
+    | Some(JArray items) -> Some(items |> List.choose parseInt)
+    | _ -> None
+
+/// A pupitre's configuration as PureData sends it (CONFIG_FULL's config), reduced to what the
+/// console records (puredata-proxy.js convertPureDataConfigToPupitreConfig).
+let convertPureDataConfig (config: JsonValue) : JsonValue =
+    let assigned =
+        sirenNumbers (path [ "sirenConfig"; "currentSirens" ] config)
+        |> Option.orElse (
+            match path [ "sirenConfig"; "assignedSirenes" ] config with
+            | Some(JArray items) -> Some(items |> List.choose parseInt)
+            | _ -> None)
+        |> Option.defaultValue []
+    let output name = path [ "outputConfig"; name ] config |> Option.map truthy |> Option.defaultValue false
+    JObject [
+        "assignedSirenes", JArray(assigned |> List.map (float >> JNumber))
+        "vstEnabled", JBool(output "vstEnabled")
+        "udpEnabled", JBool(output "udpEnabled")
+        "rtpMidiEnabled", JBool(output "rtpMidiEnabled")
+        "controllerMapping", (member' "controllerMapping" config |> Option.defaultValue (JObject []))
+        "sirens",
+        (match path [ "sirenConfig"; "sirens" ] config with
+         | Some(JArray s) -> JArray s
+         | _ -> JArray [])
+    ]
+
+/// The current preset's entry for `pupitreId` after the pupitre sent its configuration
+/// (`data`: converted by convertPureDataConfig, or PUPITRE_STATUS's raw data), as
+/// server.js handlePupitreConfigFromPupitre merges it.
+let mergePupitreConfig (data: JsonValue) (entry: PresetPupitre) : PresetPupitre =
+    let flag name = member' name data |> Option.map truthy
+    let assigned =
+        sirenNumbers (path [ "sirenConfig"; "currentSirens" ] data)
+        |> Option.orElse (
+            match member' "assignedSirenes" data with
+            | Some(JArray items) -> Some(items |> List.choose parseInt)
+            | Some _ -> Some []
+            | None -> None)
+    let mapping =
+        member' "controllerMapping" data
+        |> Option.map (fun m ->
+            match Decode.fromString (Decode.keyValuePairs ControllerSetting.decoder) (Encode.toString 0 (JsonValue.encode m)) with
+            | Ok pairs -> pairs
+            | Error _ -> [])
+    let sirenes =
+        match member' "sirens" data with
+        | Some(JArray sirens) ->
+            let start = defaultArg entry.Sirenes []
+            sirens
+            |> List.indexed
+            |> List.fold
+                (fun acc (i, siren) ->
+                    let key = $"sirene{i + 1}"
+                    let current =
+                        acc |> List.tryFind (fun (k, _) -> k = key) |> Option.map snd
+                        |> Option.defaultValue { AmbitusRestricted = None; FrettedMode = None; Extra = [] }
+                    let restricted =
+                        path [ "ambitus"; "restricted" ] siren
+                        |> Option.orElse (member' "ambitusRestricted" siren)
+                        |> Option.map truthy
+                    let fretted =
+                        match member' "frettedMode" siren with
+                        | Some(JObject _ as f) -> member' "enabled" f |> Option.map truthy |> Option.orElse (Some true)
+                        | Some other -> Some(truthy other)
+                        | None -> None
+                    let updated =
+                        { current with
+                            AmbitusRestricted = restricted |> Option.orElse current.AmbitusRestricted
+                            FrettedMode = fretted |> Option.orElse current.FrettedMode }
+                    if acc |> List.exists (fun (k, _) -> k = key) then
+                        acc |> List.map (fun (k, s) -> if k = key then k, updated else k, s)
+                    else
+                        acc @ [ key, updated ])
+                start
+            |> Some
+        | _ -> entry.Sirenes
+    { entry with
+        AssignedSirenes = assigned |> Option.orElse entry.AssignedSirenes
+        VstEnabled = flag "vstEnabled" |> Option.orElse entry.VstEnabled
+        UdpEnabled = flag "udpEnabled" |> Option.orElse entry.UdpEnabled
+        RtpMidiEnabled = flag "rtpMidiEnabled" |> Option.orElse entry.RtpMidiEnabled
+        ControllerMapping = mapping |> Option.orElse entry.ControllerMapping
+        GameMode = flag "gameMode" |> Option.orElse entry.GameMode
+        Sirenes = sirenes }
+
+/// Writes a change of the current preset coming from a pupitre; returns false when there is
+/// no current preset to change.
+let updateFromPupitre (store: Store) (pupitreId: string) (change: PresetPupitre -> PresetPupitre) : Task<bool> =
+    task {
+        let! current = store.Current()
+        return!
+            store.Locked(fun f ->
+                match f.Presets |> List.tryFind (fun p -> p.Id = current.Id) with
+                | None -> None, false
+                | Some preset ->
+                    let entry =
+                        preset.Pupitres |> List.tryFind (fun p -> p.Id = pupitreId)
+                        |> Option.defaultWith (fun () -> PresetPupitre.empty pupitreId)
+                    Some(replace (withEntry preset (change entry)) f), true)
+    }
