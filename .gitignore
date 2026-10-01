@@ -109,3 +109,7 @@ SirenManager/backend/fsharpwebserver/obj
 *.kicad_prl
 fp-info-cache
 *-backups/
+
+# SirenConsole : fichiers de travail du serveur de presets (écriture atomique, sauvegarde d’un fichier illisible)
+SirenConsole/webfiles/presets.json.tmp
+SirenConsole/webfiles/presets.json.corrupted-*

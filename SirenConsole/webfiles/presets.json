@@ -7,39 +7,6 @@
       "created": "2025-12-05T14:41:45.136Z",
       "modified": "2025-12-05T14:41:45.136Z",
       "version": "1.0",
-      "pupitres": [
-        {
-          "id": "P1",
-          "assignedSirenes": [
-            1
-          ],
-          "vstEnabled": true,
-          "udpEnabled": true,
-          "rtpMidiEnabled": true,
-          "controllerMapping": {
-            "joystickX": {
-              "cc": 1,
-              "curve": "linear"
-            },
-            "joystickY": {
-              "cc": 2,
-              "curve": "parabolic"
-            },
-            "fader": {
-              "cc": 3,
-              "curve": "hyperbolic"
-            },
-            "selector": {
-              "cc": 4,
-              "curve": "s curve"
-            },
-            "pedalId": {
-              "cc": 5,
-              "curve": "linear"
-            }
-          }
-        }
-      ],
       "config": {
         "pupitres": [
           {
@@ -163,39 +130,41 @@
       "created": "2025-12-05T14:41:45.136Z",
       "modified": "2025-12-05T14:41:45.136Z",
       "version": "1.0",
-      "pupitres": [
-        {
-          "id": "P1",
-          "assignedSirenes": [
-            1
-          ],
-          "vstEnabled": false,
-          "udpEnabled": true,
-          "rtpMidiEnabled": false,
-          "controllerMapping": {
-            "joystickX": {
-              "cc": 10,
-              "curve": "parabolic"
-            },
-            "joystickY": {
-              "cc": 11,
-              "curve": "hyperbolic"
-            },
-            "fader": {
-              "cc": 12,
-              "curve": "linear"
-            },
-            "selector": {
-              "cc": 13,
-              "curve": "s curve"
-            },
-            "pedalId": {
-              "cc": 14,
-              "curve": "linear"
+      "config": {
+        "pupitres": [
+          {
+            "id": "P1",
+            "assignedSirenes": [
+              1
+            ],
+            "vstEnabled": false,
+            "udpEnabled": true,
+            "rtpMidiEnabled": false,
+            "controllerMapping": {
+              "joystickX": {
+                "cc": 10,
+                "curve": "parabolic"
+              },
+              "joystickY": {
+                "cc": 11,
+                "curve": "hyperbolic"
+              },
+              "fader": {
+                "cc": 12,
+                "curve": "linear"
+              },
+              "selector": {
+                "cc": 13,
+                "curve": "s curve"
+              },
+              "pedalId": {
+                "cc": 14,
+                "curve": "linear"
+              }
             }
           }
-        }
-      ]
+        ]
+      }
     }
   ]
 }
