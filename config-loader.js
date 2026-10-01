@@ -72,7 +72,10 @@ function loadConfig(configPath = null) {
     console.log('📁 Chargement config depuis:', finalPath);
     
     if (!fs.existsSync(finalPath)) {
-        throw new Error(`❌ Fichier config.json introuvable: ${finalPath}`);
+        // config.json est local à chaque machine (ignoré par git) : on le crée depuis le modèle
+        const template = path.join(path.dirname(finalPath), 'config.template.json');
+        throw new Error(`❌ Fichier config.json introuvable: ${finalPath}\n` +
+            `   Créez-le depuis le modèle : cp ${template} ${finalPath}`);
     }
     
     // Lire le JSON

@@ -89,8 +89,8 @@ Il ne prétend pas être une liste d’incidents runtime observés : ce sont des
 
 ### 2.8 Templates et exemples de configuration
 
-- **`config.template.json`** (racine du dépôt) : `currentSirens: ["1"]` et `"id": "1"` pour les sirènes — **exemple en chaînes**, alors que **`SirenePupitre/config.js`** utilise des **nombres** (`"id": 1`, `currentSirens: [1]`).
-- **Effet** : les nouveaux fichiers / docs copiés depuis le template peuvent **réintroduire** le mélange types ; le pupitre compense en partie via `normalizeSirenNumericIds`, mais les autres couches (cues, WebSocket partiel) restent sensibles.
+- **`config.template.json`** (racine du dépôt) : **aligné sur les nombres** depuis octobre 2026 (`"id": 1`, `currentSirens: [1]`, comme `SirenePupitre/config.js`). Il portait auparavant des chaînes (`"id": "1"`, `currentSirens: ["1"]`).
+- **Effet** : les `config.json` créés avant cet alignement peuvent encore contenir des chaînes ; le pupitre les compense via `normalizeSirenNumericIds`.
 
 ---
 
@@ -111,7 +111,7 @@ Il ne prétend pas être une liste d’incidents runtime observés : ce sont des
 ## 4. Recommandations (sans modifier le code ici)
 
 1. **Document contractuel** : pour `*_conductor-cues.json`, préciser le type attendu (`number` JSON) pour `tick`, `durationTicks`, `ppq`, etc. — voir aussi `docs/CONDUCTOR_CUES_PROTOCOL.md` si présent.
-2. **Aligner les templates** : `config.template.json` sur le même typage que `config.js` (ids et `currentSirens` en nombres), ou annoter explicitement « legacy string accepté côté pupitre ».
+2. ~~**Aligner les templates**~~ : fait, `config.template.json` utilise des nombres (ids et `currentSirens`).
 3. **Normalisation à l’import** : une fonction unique `normalizeCueNumbers(cue)` appelée après `JSON.parse` réduit les branches `typeof === "number"` éparpillées.
 4. **Éviter `===` sur valeurs JSON** pour les identifiants et mesures : préférer `Number` / `parseInt` avec `isFinite`, ou schéma validé en amont.
 

@@ -22,10 +22,11 @@
   "sirenConfig": {   
     "cb4techID": 1,
     "mode": "restricted",
-    "currentSirens": ["1"],
+    "currentSirens": [1],
     "sirens": [
       {
-        "id": "1",
+        "id": 1,
+        "midiChannel": 1,
         "name": "S1",
         "outputs": 12,
         "ambitus": { "min": 43, "max": 86 },
@@ -36,7 +37,8 @@
         "frettedMode": { "enabled": true }
       },
       {
-        "id": "2",
+        "id": 2,
+        "midiChannel": 2,
         "name": "S2",
         "outputs": 12,
         "ambitus": { "min": 43, "max": 86 },
@@ -47,7 +49,8 @@
         "frettedMode": { "enabled": false }
       },
       {
-        "id": "3",
+        "id": 3,
+        "midiChannel": 3,
         "name": "S3",
         "outputs": 8,
         "ambitus": { "min": 36, "max": 77 },
@@ -58,7 +61,8 @@
         "frettedMode": { "enabled": false }
       },
       {
-        "id": "4",
+        "id": 4,
+        "midiChannel": 4,
         "name": "S4",
         "outputs": 9,
         "ambitus": { "min": 36, "max": 79 },
@@ -69,7 +73,8 @@
         "frettedMode": { "enabled": false }
       },
       {
-        "id": "5",
+        "id": 5,
+        "midiChannel": 5,
         "name": "S5",
         "outputs": 8,
         "ambitus": { "min": 48, "max": 94 },
@@ -80,7 +85,8 @@
         "frettedMode": { "enabled": false }
       },
       {
-        "id": "6",
+        "id": 6,
+        "midiChannel": 6,
         "name": "S6",
         "outputs": 8,
         "ambitus": { "min": 48, "max": 94 },
@@ -91,7 +97,8 @@
         "frettedMode": { "enabled": false }
       },
       {
-        "id": "7",
+        "id": 7,
+        "midiChannel": 7,
         "name": "S7",
         "outputs": 8,
         "ambitus": { "min": 48, "max": 94 },
