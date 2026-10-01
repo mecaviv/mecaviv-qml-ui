@@ -193,7 +193,10 @@ PureData envoie la grosse `CONFIG_FULL` découpée :
 
 La console et le pédalier reconnaissent le même en-tête de 8 octets. Rien dans l'en-tête ne le
 distingue des trames courtes du tableau ci-dessus : seules la longueur et l'ordre de test évitent
-la confusion.
+la confusion. **Mesuré** : `puredata-proxy.js` testait l'en-tête en premier, et prenait la plupart
+des trames POSITION de 10 octets pour des morceaux de configuration (mesures 5, 1 et 0 perdues,
+120 lue) — corrigé dans #9. **Règle du contrat** : une trame connue de taille fixe (code et
+longueur) passe avant l'en-tête de morceau ; c'est ce que fait `Shared.PureDataFrames.decode`.
 
 ### Pédalier ↔ PureData (WebSocket 10000)
 
