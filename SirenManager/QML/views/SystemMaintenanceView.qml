@@ -611,10 +611,18 @@ Rectangle {
             }
         }
 
+        // System info and the lower panes share the height; the handle between them is draggable.
+        StyledSplitView {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            orientation: Qt.Vertical
+            stateKey: "systemMain"
+
         // ==================== SYSTEM INFO ====================
         Rectangle {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 26 + 62 + 190
+            SplitView.fillWidth: true
+            SplitView.preferredHeight: 26 + 62 + 190
+            SplitView.minimumHeight: 120
             color: "#2a2a2a"; border.color: "#444"; radius: 4
 
             ColumnLayout {
@@ -670,6 +678,7 @@ Rectangle {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     orientation: Qt.Horizontal
+                    stateKey: "systemCpuDisk"
 
                 // CPU history, as Activity Monitor draws it: 0-100 % against
                 // time, newest on the right, a filled area under the line. The
@@ -923,9 +932,11 @@ Rectangle {
         // prend la part par défaut ; les poignées permettent de l'agrandir
         // quand la fenêtre est trop courte pour tout afficher.
         StyledSplitView {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
+            SplitView.fillWidth: true
+            SplitView.fillHeight: true
+            SplitView.minimumHeight: 150
             orientation: Qt.Vertical
+            stateKey: "systemDmesg"
 
         // ==================== DMESG ====================
         // The console takes the whole pane; the label and controls float over
@@ -985,6 +996,7 @@ Rectangle {
             SplitView.preferredHeight: 240
             SplitView.minimumHeight: 70
             orientation: Qt.Horizontal
+            stateKey: "systemPlaylistsMidi"
 
         // ==================== PLAYLISTS ====================
         Rectangle {
@@ -1062,6 +1074,7 @@ Rectangle {
         }
         } // StyledSplitView (PLAYLISTS | MIDI)
         } // StyledSplitView (DMESG / PLAYLISTS + MIDI)
+        } // StyledSplitView (SYSTEM INFO / rest)
     }
 
     // ==================== EXPORT KEYS ARCHIVE ====================
