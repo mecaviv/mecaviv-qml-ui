@@ -36,6 +36,10 @@ let infoToJson (i: MidiInfo) =
   o["channels"] <- ch
   if i.Sha256 <> "" then o["sha256"] <- JsonValue.Create i.Sha256
 
+  if i.RiskLevel > 0 then
+    o["riskLevel"] <- JsonValue.Create i.RiskLevel
+    o["riskMask"] <- JsonValue.Create i.RiskMask
+
   match i.Split with
   | Some s ->
     let so = JsonObject()
@@ -60,6 +64,8 @@ let private infoOfJson (o: JsonNode) : MidiInfo =
     Notes = int o["notes"]
     Channels = [ for c in o["channels"].AsArray() -> int c ]
     Sha256 = (match o["sha256"] with | null -> "" | v -> string v)
+    RiskLevel = (match o["riskLevel"] with | null -> 0 | v -> int v)
+    RiskMask = (match o["riskMask"] with | null -> 0 | v -> int v)
     Split =
       match o["split"] with
       | null -> None

@@ -1,6 +1,6 @@
 /// Scan jobs: what a list of MIDI files says about itself, read where it is cheapest.
 ///
-/// On an Artila the parsing is done ON the board by `midi-info-board` (firmwares-artila/tools/midi-info-board,
+/// On an Artila the parsing is done ON the board by `midi-info-board` (firmwares-artila/tools/midi-split-board,
 /// a 12 KB static program): it reads each file from flash and sends back one short line, about
 /// 0.26 ms of CPU per KB against ~2.7 ms per KB to push the bytes through ssh's cipher, and
 /// it runs at the lowest priority with a pause after every file so m_seq keeps the CPU. On a
@@ -33,12 +33,12 @@ let maitre = "linuxMaitre"
 /// The Pi is not an Artila: no old-ABI ARM userland there.
 let canRunBoardTool (machine: string) = machine <> "raspberryClic"
 
-/// The board program (tools/midi-info-board in firmwares-artila, `./build.sh` there):
+/// The board program (firmwares-artila/tools/midi-split-board, `./build.sh` there):
 /// $SIREN_MIDI_INFO_BOARD, boardtools/ next to the backend, or the firmwares-artila checkout
 /// found by walking up from the backend or the working folder.
 let findTool () : string option =
   let rel =
-    Path.Combine("firmwares-artila", "tools", toolName, "target", "armv4t-unknown-linux-gnueabi", "release", toolName)
+    Path.Combine("firmwares-artila", "tools", "midi-split-board", "target", "armv4t-unknown-linux-gnueabi", "release", toolName)
 
   let rec up (d: DirectoryInfo) =
     seq {
@@ -86,14 +86,19 @@ let tryJob id =
   | true, j -> Some j
   | _ -> None
 
-/// Whether a split file's master is the Maitre's file of that name: None while unknown.
+/// Whether a split file's master is the Maitre's file of that name (or a plain copy is the same
+/// file as the Maitre's): None while unknown.
 let masterMatch machine name (i: MidiInfo) =
-  match i.Split with
-  | Some s when machine <> maitre ->
+  if machine = maitre then
+    None
+  else
     match MidiCache.tryAny maitre name with
-    | Some e when e.Info.Sha256 <> "" -> Some(e.Info.Sha256 = s.MasterSha)
+    | Some e when e.Info.Sha256 <> "" ->
+      match i.Split with
+      | Some s -> Some(e.Info.Sha256 = s.MasterSha)                      // a split: its master is the Maitre's file
+      | None when i.Sha256 <> "" -> Some(e.Info.Sha256 = i.Sha256)       // a copy: the same bytes
+      | None -> None
     | _ -> None
-  | _ -> None
 
 let private lineOf (machine: string) (name: string) (st: FileStat) (fromCache: bool) (result: Result<MidiInfo, string>) =
   let o = JsonObject()
@@ -141,9 +146,9 @@ let private scan cfg (machine: string) (dir: string) (files: string list) pauseM
       match tool with
       | Some local ->
         do! ensureTool cfg machine local
-        // The Maitre's masters are hashed (what the splits are compared with); anywhere else
-        // only the split files' own hash is checked.
-        let flag = if machine = maitre then "--sha" else "--verify"
+        // Hash every file (the Maitre's masters are what the others are compared with) and check
+        // the split files' own hash, which costs nothing on a file that is not a split.
+        let flag = "--sha --verify"
         let paths = missing |> Seq.map (fun n -> quote (dir.TrimEnd('/') + "/" + n)) |> String.concat " "
         let todo = Collections.Generic.Queue<string>(missing)
         setCurrent (todo.Peek())
@@ -215,7 +220,7 @@ let start cfg machine (dir: string) (files: string list) (pauseMs: int) =
         // then say again, for each, whether it matches.
         let unknown =
           results
-          |> Seq.choose (fun (n, r) -> match r with Ok i when (masterMatch machine n i).IsNone && i.Split.IsSome && machine <> maitre -> Some n | _ -> None)
+          |> Seq.choose (fun (n, r) -> match r with Ok i when (masterMatch machine n i).IsNone && machine <> maitre && (i.Split.IsSome || i.Sha256 <> "") -> Some n | _ -> None)
           |> List.ofSeq
 
         if not unknown.IsEmpty then

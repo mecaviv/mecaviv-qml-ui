@@ -31,7 +31,12 @@ type MidiInfo =
     Notes: int
     Channels: int list    // 1..16
     Sha256: string        // of the file, when it was asked for ("" otherwise)
-    Split: SplitInfo option }
+    Split: SplitInfo option
+    /// What the production C reader cannot take (m_seq/POSTMORTEM_SONG_END.md): level 2 = in a
+    /// track that is not the last (the song is not loaded), 1 = in the last track (cut short);
+    /// mask bit 0 program change, bit 1 pressure, bit 2 SysEx. 0 / 0 when the file is fine.
+    RiskLevel: int
+    RiskMask: int }
 
 let private be16 (b: byte[]) i = int b[i] <<< 8 ||| int b[i + 1]
 let private be32 (b: byte[]) i = (int64 b[i] <<< 24) ||| (int64 b[i + 1] <<< 16) ||| (int64 b[i + 2] <<< 8) ||| int64 b[i + 3]
@@ -51,7 +56,8 @@ let private vlq (b: byte[]) (i: int) =
   v, p
 
 type private TrackScan =
-  { EndTick: int64
+  { EndTick: int64         // the firmware's rule: latest end of track, channel message or marker
+    Unsafe: int            // mask of what the production reader gives up on
     Tempos: (int64 * int) list     // tick, microseconds per quarter note
     Notes: int
     Channels: Set<int>
@@ -67,6 +73,8 @@ let private scanTrack (b: byte[]) (start: int) (stop: int) =
   let mutable channels = Set.empty
   let mutable timeSig = None
   let mutable name = None
+  let mutable endTick = 0L
+  let mutable unsafeMask = 0
 
   while i < stop do
     let dt, p = vlq b i
@@ -84,6 +92,10 @@ let private scanTrack (b: byte[]) (start: int) (stop: int) =
 
         if p2 + len <= b.Length then
           match kind with
+          | 0x2F | 0x06 -> endTick <- max endTick tick        // end of track, marker
+          | _ -> ()
+
+          match kind with
           | 0x51 when len = 3 -> tempos <- (tick, (int b[p2] <<< 16) ||| (int b[p2 + 1] <<< 8) ||| int b[p2 + 2]) :: tempos
           | 0x58 when len >= 2 && timeSig.IsNone -> timeSig <- Some $"{int b[p2]}/{1 <<< int b[p2 + 1]}"
           | 0x03 when name.IsNone && len > 0 -> name <- Some((Encoding.Latin1.GetString(b, p2, len)).Trim())
@@ -91,6 +103,7 @@ let private scanTrack (b: byte[]) (start: int) (stop: int) =
 
         i <- p2 + len
       elif first = 0xF0 || first = 0xF7 then
+        unsafeMask <- unsafeMask ||| 4
         let len, p2 = vlq b (i + 1)
         i <- p2 + int len
       else
@@ -105,6 +118,8 @@ let private scanTrack (b: byte[]) (start: int) (stop: int) =
         let kind = status &&& 0xF0
         let channel = (status &&& 0x0F) + 1
         let dataLen = if kind = 0xC0 || kind = 0xD0 then 1 else 2
+        endTick <- max endTick tick                          // a channel message
+        unsafeMask <- unsafeMask ||| (match kind with 0xC0 -> 1 | 0xA0 | 0xD0 -> 2 | _ -> 0)
 
         if kind = 0x90 && dataStart + 1 < b.Length && b[dataStart + 1] > 0uy then
           notes <- notes + 1
@@ -114,7 +129,8 @@ let private scanTrack (b: byte[]) (start: int) (stop: int) =
 
         i <- dataStart + dataLen
 
-  { EndTick = tick
+  { EndTick = endTick
+    Unsafe = unsafeMask
     Tempos = List.rev tempos
     Notes = notes
     Channels = channels
@@ -128,7 +144,7 @@ let parse (b: byte[]) : Result<MidiInfo, string> =
     else
       let format, ntrks, division = be16 b 8, be16 b 10, be16 b 12
 
-      if division &&& 0x8000 <> 0 then
+      if division &&& 0x8000 <> 0 || division = 0 then
         Error "SMPTE time division"
       else
         let mutable pos = 8 + int (be32 b 4)
@@ -147,27 +163,39 @@ let parse (b: byte[]) : Result<MidiInfo, string> =
         let tempos = tracks |> Seq.collect (fun t -> t.Tempos) |> Seq.sortBy fst |> List.ofSeq
         let endTick = if tracks.Count = 0 then 0L else tracks |> Seq.map (fun t -> t.EndTick) |> Seq.max
 
-        let seconds =
-          let rec go (lastTick: int64) (us: int) acc rest =
+        // Microseconds through the tempo map in integer maths (as midi-info-board does), then
+        // milliseconds; a tempo change after the end does not count.
+        let micros =
+          let rec go (lastTick: int64) (us: int64) (acc: int64) rest =
             match rest with
-            | (t, newUs) :: tail -> go t newUs (acc + float (t - lastTick) * float us / float division / 1e6) tail
-            | [] -> acc + float (endTick - lastTick) * float us / float division / 1e6
+            | (t: int64, newUs: int) :: tail when t <= endTick -> go t (int64 newUs) (acc + (t - lastTick) * us / int64 division) tail
+            | _ -> acc + (endTick - lastTick) * us / int64 division
 
-          go 0L 500000 0.0 tempos
+          go 0L 500000L 0L tempos
+
+        let risk =
+          tracks |> Seq.mapi (fun i t -> i, t.Unsafe) |> Seq.filter (fun (_, u) -> u <> 0) |> List.ofSeq
+
+        let riskLevel =
+          if risk.IsEmpty then 0
+          elif risk |> List.exists (fun (i, _) -> i < tracks.Count - 1) then 2
+          else 1
 
         Ok
           { Name = tracks |> Seq.tryPick (fun t -> t.Name) |> Option.defaultValue ""
             Format = format
             Tracks = tracks.Count
             Ppq = division
-            DurationSec = seconds
+            DurationSec = float (micros / 1000L) / 1000.0
             Bpm = (match tempos with (_, us) :: _ -> 60e6 / float us | [] -> 120.0)
             TempoChanges = tempos.Length
             TimeSig = tracks |> Seq.tryPick (fun t -> t.TimeSig) |> Option.defaultValue "4/4"
             Notes = tracks |> Seq.sumBy (fun t -> t.Notes)
             Channels = tracks |> Seq.collect (fun t -> t.Channels) |> Set.ofSeq |> Set.toList
             Sha256 = ""
-            Split = None }
+            Split = None
+            RiskLevel = riskLevel
+            RiskMask = risk |> List.fold (fun a (_, u) -> a ||| u) 0 }
   with ex ->
     Error ex.Message
 
@@ -244,7 +272,7 @@ let sha256 (bytes: byte[]) =
 /// One line of `midi-info-board` (tools/midi-split-board): the board parses the file
 /// itself and sends back what is shown. Returns the file name, its size and the reading.
 ///   I size=N ms=N fmt=N tracks=N ppq=N end=N ch=0xHHHH notes=N tempos=N tempo=N sig=N/N dur=N
-///     [split=ch:N,mlen:N,msha:HEX[,own:ok|bad]] [sha=HEX] name=NAME
+///     [risk=L:M] [split=ch:N,mlen:N,msha:HEX[,own:ok|bad]] [sha=HEX] name=NAME
 ///   E err=KIND size=N name=NAME
 let parseBoardLine (line: string) : (string * int64 * Result<MidiInfo, string>) option =
   let at = line.IndexOf " name="
@@ -290,6 +318,12 @@ let parseBoardLine (line: string) : (string * int64 * Result<MidiInfo, string>) 
 
       let tempoUs = max 1L (num "tempo")
 
+      // risk=L:M
+      let riskLevel, riskMask =
+        match (get "risk").Split ':' with
+        | [| l; k |] -> (match Int32.TryParse l, Int32.TryParse k with | (true, a), (true, b) -> a, b | _ -> 0, 0)
+        | _ -> 0, 0
+
       Some(
         name,
         size,
@@ -305,5 +339,7 @@ let parseBoardLine (line: string) : (string * int64 * Result<MidiInfo, string>) 
             Notes = int (num "notes")
             Channels = channels
             Sha256 = get "sha"
-            Split = split }
+            Split = split
+            RiskLevel = riskLevel
+            RiskMask = riskMask }
       )

@@ -367,6 +367,10 @@ Rectangle {
 
         function onBackendReply(requestId, success, bodyJson, error) {
             var parts = requestId.split(":")
+            if (parts[0] === "fleet-scan" || parts[0] === "fleet-poll") {
+                if (parseInt(parts[1]) === root.fleetGen) root.fleetReply(parts[0], parts[2], success, bodyJson, error)
+                return
+            }
             if (parts[0] !== "midi-scan" && parts[0] !== "midi-poll") return
             if (parseInt(parts[1]) !== root.midiGen) return                 // a cancelled run
             var body = success ? JSON.parse(bodyJson) : null
@@ -845,6 +849,16 @@ Rectangle {
                 if (state === "reading") tip += "\nlecture en cours…"
                 if (state === "failed") tip += "\nillisible : " + failed[e.file]
                 var mark = "", markColor = "#888"
+                if (ok && i.riskLevel > 0) {
+                    // What the production C reader gives up on (m_seq/POSTMORTEM_SONG_END.md).
+                    var what = []
+                    if (i.riskMask & 1) what.push("changement de programme")
+                    if (i.riskMask & 2) what.push("pression")
+                    if (i.riskMask & 4) what.push("SysEx")
+                    mark = "!"; markColor = i.riskLevel === 2 ? "#d98a7a" : "#d4a85a"
+                    tip += i.riskLevel === 2 ? "\nne se charge pas avec le module de production : " : "\npiste tronquée avec le module de production : "
+                    tip += what.join(", ")
+                }
                 if (ok && i.split) {
                     // A file cut by midi-split: its own hash, and the master it came from.
                     var sp = i.split
@@ -931,10 +945,117 @@ Rectangle {
         midiByMachine = byMachine
         midiDown = down
         renderMidi()
+        startFleetScan()
     }
+
+    // ---- what every machine's files say about themselves ---------------------------------
+    // After the listing, each machine that answered gets a scan job (the Maitre first: its masters'
+    // hashes are what the others are compared with). Each job reads the files on the board, at
+    // low priority, one by one; the listing below fills in as lines arrive.
+    property int fleetGen: 0
+    property var fleet: ({})                    // machine id -> {job, next, done, inflight, current, via, byName, failed}
+    property var fleetWaiting: []               // machine ids not started yet (they wait for the Maitre)
+    readonly property int fleetPauseMs: 1000
+
+    function midiNames(id) {
+        return (midiByMachine[id] || []).map(function(e) { return e.name }).filter(function(n) { return /\.(midi?|MIDI?)$/.test(n) })
+    }
+    function startFleetScan() {
+        fleetGen++
+        fleet = ({})
+        var ids = machines.map(function(m) { return m.id }).filter(function(id) { return midiByMachine[id] !== undefined })
+        fleetWaiting = ids.filter(function(id) { return id !== 0 })
+        if (midiByMachine[0] !== undefined) startFleetJob(0)
+        else { var all = fleetWaiting; fleetWaiting = []; all.forEach(startFleetJob) }
+    }
+    function startFleetJob(id) {
+        var names = midiNames(id)
+        var st = {}
+        for (var k in fleet) st[k] = fleet[k]
+        st[id] = { job: "", next: 0, done: names.length === 0, inflight: false, current: "", via: "", byName: {}, failed: {} }
+        fleet = st
+        if (names.length === 0) { renderMidi(); return }
+        SshManager.callBackend("/api/midi/scan",
+            JSON.stringify({ machineType: id, dir: MachinePaths.midiPath(id), files: names, pauseMs: fleetPauseMs }),
+            "fleet-scan:" + fleetGen + ":" + id)
+    }
+    function pollFleet() {
+        for (var k in fleet) {
+            var m = fleet[k]
+            if (m.job !== "" && !m.done && !m.inflight) {
+                m.inflight = true
+                SshManager.callBackend("/api/midi/scan/poll", JSON.stringify({ jobId: m.job, from: m.next }),
+                                       "fleet-poll:" + fleetGen + ":" + k)
+            }
+        }
+    }
+    property int fleetRev: 0                    // bumped when a machine's state changed in place
+    readonly property bool fleetActive: { fleetRev; return Object.keys(fleet).some(function(k) { return fleet[k].job !== "" && !fleet[k].done }) }
+    Timer {
+        interval: 800; repeat: true
+        running: root.fleetActive && root.visible
+        onTriggered: root.pollFleet()
+    }
+    function fleetReply(kind, id, success, bodyJson, error) {
+        var m = fleet[id]
+        if (!m) return
+        var body = success ? JSON.parse(bodyJson) : null
+        if (kind === "fleet-scan") {
+            if (!body) { m.done = true; m.failed["*"] = error; fleetRev++; return }
+            m.job = body.jobId; m.via = body.via
+            pollFleet()
+            return
+        }
+        m.inflight = false
+        if (!body) { m.done = true; fleetRev++; return }
+        body.lines.forEach(function(l) {
+            if (l.info) m.byName[l.file] = { info: l.info, masterMatch: l.masterMatch }
+            else m.failed[l.file] = l.error || "illisible"
+        })
+        m.next += body.lines.length
+        m.current = body.current
+        if (body.done) {
+            m.done = true; m.current = ""
+            if (id == 0 && fleetWaiting.length > 0) { var go = fleetWaiting; fleetWaiting = []; go.forEach(startFleetJob) }
+        }
+        fleetRev++                                    // tell the bindings
+        renderMidi()
+    }
+
+    // The channel a siren plays (S1..S7 are the machines 2..8); unknown for the others.
+    function expectedChannel(id) { return id >= 2 && id <= 8 ? id - 1 : 0 }
+
+    // What a file on a machine is, against the Maitre's: [text, color, rank] (rank: 0 fine, 1 warn, 2 bad).
+    function fileVerdict(id, name, size, refMap) {
+        var scan = fleet[id] && fleet[id].byName[name]
+        if (id === 0) {
+            var i0 = scan && scan.info
+            if (i0 && i0.riskLevel > 0)
+                return [i0.riskLevel === 2 ? "! ne se charge pas (module de production)" : "! piste tronquée (module de production)", i0.riskLevel === 2 ? "#d98a7a" : "#d4a85a", 1]
+            return ["", "#888", 0]
+        }
+        if (!refMap.hasOwnProperty(name)) return ["+ absent du Maître", "#8fc4ff", 1]
+        if (!scan) {
+            if (fleet[id] && fleet[id].failed[name] !== undefined) return ["? illisible", "#d98a7a", 2]
+            return [fleet[id] && !fleet[id].done ? "…" : (refMap[name] === size ? "✓ (taille)" : "⚠ taille ≠ Maître"), "#888", 0]
+        }
+        var i = scan.info, sp = i.split
+        if (sp) {
+            if (sp.ownOk === false) return ["✗ endommagé", "#d98a7a", 2]
+            if (scan.masterMatch === false) return ["⚠ le maître a changé", "#d4a85a", 1]
+            var want = expectedChannel(id)
+            if (want > 0 && sp.channel !== want) return ["⚠ canal " + sp.channel + " (attendu " + want + ")", "#d4a85a", 1]
+            if (scan.masterMatch === true) return ["✓ découpé, canal " + sp.channel, "#7fbf94", 0]
+            return ["· maître non comparé", "#888", 0]
+        }
+        if (scan.masterMatch === true) return ["✓ copie identique", "#7fbf94", 0]
+        if (scan.masterMatch === false) return ["⚠ différent du Maître", "#d4a85a", 1]
+        return ["· non comparé", "#888", 0]
+    }
+
     function renderMidi() {
-        // Maître is id=0; treat its file set as canonical and annotate
-        // others against it. Files only on a non-Maître show up tagged "+".
+        // The Maitre (id 0) is the reference: its file set is canonical, the other machines are
+        // judged against it (see fileVerdict). Files only on another machine are tagged "+".
         var ref = midiByMachine[0] || []
         var refMap = {}
         var maxSize = 1, maxName = 10
@@ -951,34 +1072,38 @@ Rectangle {
                 out += heading(m.name) + span("#e05555", " — " + midiDown[m.id]) + "\n\n"
                 continue
             }
-            var entries = midiByMachine[m.id] || []
-            out += heading(m.name + (m.id === 0 ? " (référence)" : ""))
-                 + span("#777", " — " + entries.length + " fichier(s)") + "\n"
+            var entries = (midiByMachine[m.id] || []).slice()
             entries.sort(function(a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0 })
+            var rows = "", counts = [0, 0, 0]
             for (var j = 0; j < entries.length; j++) {
                 var e = entries[j]
                 var frac = e.size / maxSize
-                var tag = "", nameColor = "#dddddd"
-                if (m.id !== 0) {
-                    if (refMap.hasOwnProperty(e.name)) {
-                        if (refMap[e.name] === e.size) tag = span("#5ac878", "✓")
-                        else { tag = span("#e0a030", "⚠ Maître " + fmtBytes(refMap[e.name])); nameColor = "#e0a030" }
-                    } else { tag = span("#8fc4ff", "+ absent du Maître"); nameColor = "#8fc4ff" }
-                }
-                out += "  " + span(sizeColor(frac), padL(fmtBytes(e.size), 9)) + "  "
-                     + span(nameColor, esc(padR(e.name, maxName))) + "  " + tag + "\n"
+                var v = fileVerdict(m.id, e.name, e.size, refMap)
+                counts[v[2]]++
+                rows += "  " + span(sizeColor(frac), padL(fmtBytes(e.size), 9)) + "  "
+                      + span(v[2] === 0 ? "#dddddd" : v[1], esc(padR(e.name, maxName))) + "  " + span(v[1], esc(v[0])) + "\n"
             }
-            // For non-Maître machines, list files present on Maître but missing here.
+            // On the Maitre's list but not here.
+            var gone = 0
             if (m.id !== 0 && ref.length > 0) {
                 var present = {}
                 for (var j = 0; j < entries.length; j++) present[entries[j].name] = true
                 var missing = []
                 for (var rname in refMap) if (!present[rname]) missing.push(rname)
                 missing.sort()
+                gone = missing.length
                 for (var q = 0; q < missing.length; q++)
-                    out += "  " + span("#777", padL("absent", 9)) + "  " + span("#e05555", esc(padR(missing[q], maxName))) + "  " + span("#e05555", "✗") + "\n"
+                    rows += "  " + span("#777", padL("absent", 9)) + "  " + span("#e05555", esc(padR(missing[q], maxName))) + "  " + span("#e05555", "✗ manquant") + "\n"
             }
-            out += "\n"
+            var f = fleet[m.id]
+            var working = f && !f.done
+            var summary = span("#777", " — " + entries.length + " fichier(s)")
+            if (m.id !== 0 || ref.length > 0) {
+                summary += (counts[1] > 0 ? "  " + span("#d4a85a", "⚠ " + counts[1]) : "")
+                         + (counts[2] + gone > 0 ? "  " + span("#d98a7a", "✗ " + (counts[2] + gone)) : "")
+            }
+            if (working) summary += "  " + span("#ff9f1a", "lecture… " + f.current)
+            out += heading(m.name + (m.id === 0 ? " (référence)" : "")) + summary + "\n" + rows + "\n"
         }
         midiArea.text = "<pre style=\"margin:0\">" + out + "</pre>"
         var downNames = machines.filter(function(m) { return midiDown[m.id] !== undefined }).map(function(m) { return m.name })
