@@ -483,17 +483,11 @@ function handleWebSocketConnection(ws, request) {
                             timestamp: Date.now()
                         };
                         
-                        // Diffuser aux clients UI
-                        broadcastToClients({
-                            type: 'VOLANT_DATA',
-                            pupitreId: pupitreId,
-                            note: note,
-                            velocity: velocity,
-                            pitchbend: pitchbend,
-                            frequency: frequency,
-                            rpm: rpm,
-                            timestamp: Date.now()
-                        })
+                        // Diffuser aux clients UI, sous la même forme que puredata-proxy.js
+                        // (noteFloat, pupitreId "P3") : le client ignore VOLANT_DATA sans noteFloat
+                        if (pureDataProxy) {
+                            pureDataProxy.broadcastVolantData(`P${pupitreId}`, note, velocity, pitchbend, frequency, rpm)
+                        }
                     }
                 }
             }
