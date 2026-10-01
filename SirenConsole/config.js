@@ -1,6 +1,6 @@
-// Configuration SirenConsole
-// Cette configuration charge les données depuis config.json (source unique de vérité)
-// et ajoute uniquement les données spécifiques à SirenConsole
+// Configuration SirenConsole : les pupitres (adresses et ports).
+// Lue par webfiles/server.js (require('../config.js')) et puredata-proxy.js, servie sous
+// /config.js, et parcourue par scripts/update-all-pupitres.sh (lignes host: de pupitres).
 
 const config = {
     // Configuration des pupitres - chargée depuis config.json
@@ -69,90 +69,7 @@ const config = {
             enabled: true,
             status: "disconnected"
         }
-    ],
-    
-    // Configuration spécifique à SirenConsole (pas dans config.json)
-    ui: {
-        fullScreen: false,
-        currentPage: 0, // 0=Overview, 1=Config, 2=Logs
-        theme: "dark",
-        autoConnect: false,
-        reconnectInterval: 5000, // ms
-        showSirenAssignment: true,
-        showPupitreStatus: true,
-        showControllerMapping: true
-    },
-    
-    // Presets de configuration (spécifiques à SirenConsole)
-    presets: {
-        "Concert Standard": {
-            description: "Configuration standard pour concert",
-            pupitreConfig: {
-                ambitus: { min: 48, max: 72 },
-                frettedMode: false,
-                uiScale: 1.0
-            },
-            uiConfig: {
-                controllersPanelVisible: true,
-                adminMode: false
-            }
-        },
-        "Mode Fretté": {
-            description: "Tous les pupitres en mode fretté",
-            pupitreConfig: {
-                frettedMode: true
-            }
-        },
-        "Ambitus Étendu": {
-            description: "Ambitus étendu pour plus de notes",
-            pupitreConfig: {
-                ambitus: { min: 36, max: 84 }
-            }
-        },
-        "Mode Test": {
-            description: "Configuration pour les tests",
-            pupitreConfig: {
-                ambitus: { min: 60, max: 72 },
-                frettedMode: true,
-                uiScale: 1.2
-            },
-            uiConfig: {
-                controllersPanelVisible: false,
-                adminMode: true
-            }
-        }
-    },
-    
-    // Configuration des couleurs (spécifique à SirenConsole)
-    colors: {
-        background: "#1a1a1a",
-        surface: "#2a2a2a",
-        primary: "#00ff00",
-        secondary: "#ff6b6b",
-        accent: "#ffaa00",
-        text: "#ffffff",
-        textSecondary: "#cccccc",
-        pupitre: "#2E86AB",
-        siren: "#F18F01",
-        connected: "#00ff00",
-        disconnected: "#ff6b6b",
-        warning: "#ffaa00"
-    },
-    
-    // Configuration des serveurs (pour puredata-proxy.js)
-    servers: {
-        websocket: {
-            host: "192.168.1.41",
-            port: 10002
-        }
-    },
-    
-    // Configuration de l'assignation des sirènes (spécifique à SirenConsole)
-    sirenAssignment: {
-        mode: "exclusive", // 1 sirène = 1 pupitre
-        autoAssign: true,
-        allowReassignment: true
-    }
+    ]
 }
 
 // Export pour Node.js
