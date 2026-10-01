@@ -6,10 +6,10 @@ reboot;Redémarre la sirène\nsélectionnée (après\nconfirmation).
 rebootAll;Redémarre les 13 sirènes\n(après confirmation).
 refresh;Relit l’état système :\nCPU, mémoire, disque\net processus.
 trackCpu;Mesure la charge CPU en\ncontinu et la trace dans\nle graphique.
-diskDetail;Affiche l’occupation du disque\npar dossier.
+diskDetail;Rafraîchit le détail du disque :\noccupation par dossier et\nplus gros fichiers.
 kernelThreads;Affiche aussi les threads\ndu noyau dans la liste\ndes processus.
 trackDmesg;Rafraîchit dmesg en continu\net suit les nouvelles lignes.
 dmesgAll;Charge tous les messages\ndu journal noyau.
 dmesgErrors;Charge seulement les\nerreurs et alertes\ndu journal noyau.
 refreshAll;Rafraîchit d’un coup :\nétat système, détail disque,\ndmesg et playlists.
-followAll;Active ou coupe le suivi\ncontinu du CPU et de dmesg.
+followAll;Active ou coupe le suivi continu\ndu CPU et de dmesg, et affiche\nles processus noyau.

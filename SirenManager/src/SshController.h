@@ -24,6 +24,16 @@ public:
     void setBackendUrl(const QString &url);
 
     Q_INVOKABLE void executeCommand(int machineType, const QString &command, const QString &requestId);
+    // One request for several machines: itemsJson is an array of
+    // {machineType:int, command:string}. The backend runs them together, logs a
+    // single summary, and skips boards it just found unreachable. Emits
+    // batchFinished with a JSON array of {machineType (alias), success, output,
+    // error, unreachable} in the same order as the items.
+    Q_INVOKABLE void executeBatch(const QString &itemsJson, const QString &requestId);
+    // Generic POST to a backend route: bodyJson is sent as is, except that an
+    // integer machineType is turned into the backend's machine key. Emits
+    // backendReply with the response body as JSON.
+    Q_INVOKABLE void callBackend(const QString &path, const QString &bodyJson, const QString &requestId);
     Q_INVOKABLE void downloadFile(int machineType, const QString &remotePath, const QString &requestId);
     Q_INVOKABLE void uploadFile(int machineType, const QString &remotePath, const QString &content, const QString &requestId);
 
@@ -61,6 +71,8 @@ public:
 signals:
     void backendUrlChanged(const QString &url);
     void commandFinished(const QString &requestId, bool success, const QString &output, const QString &error);
+    void batchFinished(const QString &requestId, bool success, const QString &resultsJson, const QString &error);
+    void backendReply(const QString &requestId, bool success, const QString &bodyJson, const QString &error);
     void downloadFinished(const QString &requestId, bool success, const QString &content, const QString &error);
     void uploadFinished(const QString &requestId, bool success, const QString &error);
     // results is the raw JSON array string from the backend: each entry is

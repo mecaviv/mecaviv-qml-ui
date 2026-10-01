@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtCore
 import SirenManager
 import "../controllers/MachinePaths.js" as MachinePaths
 import "../components"
@@ -13,7 +14,12 @@ Rectangle {
     // ("\n" in the text is a line break, kept short so the tooltip stays narrow).
     property var tips: ({})
     function tip(key) { return tips[key] || "" }
+
+    // The memory and disk tiles fill themselves the first time the tab shows.
+    onVisibleChanged: if (visible && memTotalKb < 0) refreshSystemInfo()
     Component.onCompleted: {
+        loadHistory()
+        if (visible) Qt.callLater(refreshSystemInfo)         // the tab was restored as the current one
         var xhr = new XMLHttpRequest()
         xhr.onreadystatechange = function() {
             if (xhr.readyState !== XMLHttpRequest.DONE) return
@@ -59,13 +65,15 @@ Rectangle {
     // costs about a second, so a `ControlMaster auto` + `ControlPersist 60` in
     // ~/.ssh/config for the board makes the ticks nearly free.
     readonly property int dmesgTrackMs: 3000
-    readonly property int cpuTrackMs: 2000
-    readonly property int cpuHistory: 90          // samples kept in the plot
+    readonly property int cpuTrackMs: 5000
+    readonly property int cpuHistory: 120         // samples kept in the plot (10 min at 5 s)
     property bool dmesgInFlight: false
     property bool cpuInFlight: false
     property string lastDmesgText: ""
     property var cpuPrev: null                    // {total, idle} of the last /proc/stat
     property var cpuSamples: []                   // percent, oldest first
+    property bool diskDetailLoaded: false         // the full detail replaced the filesystem summary
+    property var memSamples: []                   // memory used, percent, one per tick
     property string cpuLoad: ""
     property int cpuCores: 1
     property var procPrev: ({})                   // pid -> jiffies (utime+stime) of the last tick
@@ -97,7 +105,7 @@ Rectangle {
         // measurement barely loads the board it measures.
         SshManager.executeCommand(currentMachine().id,
             "grep '^cpu' /proc/stat; cat /proc/loadavg;"
-            + " grep -E '^(MemTotal|MemFree|Buffers|Cached):' /proc/meminfo;"
+            + " cat /proc/meminfo;"
             + " cat /proc/[0-9]*/stat 2>/dev/null;"
             + " grep '^Uid:' /proc/[0-9]*/status 2>/dev/null; cat /etc/passwd 2>/dev/null", "cpu-track")
     }
@@ -117,11 +125,17 @@ Rectangle {
         if (dTotal > 0) {
             var pct = 100 * (1 - (idle - cpuPrev.idle) / dTotal)
             var next = cpuSamples.concat([Math.max(0, Math.min(100, pct))])
+            var dropped = Math.max(0, next.length - cpuHistory)
+            staleCount = Math.max(0, staleCount - dropped)                                  // the past scrolls out
+            demoPad = Math.max(0, demoPad - dropped)
             cpuSamples = next.slice(-cpuHistory)
+            lastSampleMs = Date.now()
         }
         cpuPrev = { total: total, idle: idle }
-        cpuCanvas.requestPaint()
         onMemSample(output)
+        if (memTotalKb > 0 && memUsedKb >= 0)
+            memSamples = memSamples.concat([100 * memUsedKb / memTotalKb]).slice(-cpuHistory)
+        if (dTotal > 0) saveHistory()
         onProcessSample(output, dTotal)
     }
 
@@ -229,14 +243,80 @@ Rectangle {
         return list
     }
 
+    // ---- plot history, kept across launches -------------------------------
+    // The last samples of each machine are stored; on launch they come back as
+    // "stale": dimmed, with a divider and the time of the last sample. New
+    // samples append after them, so the divider scrolls left until it is out of
+    // the window.
+    property int staleCount: 0                    // leading samples that come from before
+    property int demoPad: 0                       // of those, random ones added in a debug build (never saved)
+    property double lastSampleMs: 0               // when the newest sample was taken
+    property double staleMs: 0                    // when the last stale sample was taken
+    readonly property string staleLabel: staleCount > 0 && staleMs > 0 ? "données de " + stampText(staleMs) : ""
+
+    Settings {
+        id: historyStore
+        category: "SystemHistory"
+        property string byMachine: "{}"           // {"<machine id>": {cpu: [...], mem: [...], t: ms}}
+    }
+
+    function stampText(ms) {
+        var d = new Date(ms), now = new Date()
+        return d.toDateString() === now.toDateString() ? Qt.formatDateTime(d, "HH:mm:ss")
+                                                       : Qt.formatDateTime(d, "ddd d MMM HH:mm")
+    }
+    function saveHistory() {
+        var all = {}
+        try { all = JSON.parse(historyStore.byMachine) } catch (e) { all = {} }
+        var round = function(v) { return Math.round(v * 10) / 10 }
+        all[currentMachine().id] = { cpu: cpuSamples.slice(demoPad).map(round), mem: memSamples.slice(demoPad).map(round), t: lastSampleMs }
+        historyStore.byMachine = JSON.stringify(all)
+    }
+    // A smooth random walk, to pad the plots of a debug build.
+    function demoSeries(n, start, spread, lo, hi) {
+        var out = [], x = start
+        for (var i = 0; i < n; i++) {
+            x = Math.max(lo, Math.min(hi, x + (Math.random() - 0.5) * spread))
+            out.push(x)
+        }
+        return out
+    }
+    function loadHistory() {
+        var all = {}
+        try { all = JSON.parse(historyStore.byMachine) } catch (e) { all = {} }
+        var h = all[currentMachine().id]
+        var cpu = [], mem = []
+        staleMs = 0; lastSampleMs = 0; demoPad = 0
+        if (h && h.cpu && h.cpu.length > 0) {
+            cpu = h.cpu.slice(-cpuHistory)
+            mem = (h.mem || []).slice(-cpuHistory)
+            staleMs = h.t || 0
+            lastSampleMs = staleMs
+        }
+        if (isDebugBuild && cpu.length < cpuHistory) {
+            var n = cpuHistory - cpu.length
+            cpu = demoSeries(n, 25, 30, 2, 95).concat(cpu)
+            mem = demoSeries(n, 9, 4, 3, 30).concat(mem)
+            demoPad = n
+            if (staleMs === 0) staleMs = Date.now() - cpuHistory * cpuTrackMs
+        }
+        cpuSamples = cpu
+        memSamples = mem
+        staleCount = cpu.length
+    }
+    // Following starts again: everything on the plot is now from before.
+    function markStale() {
+        staleCount = cpuSamples.length
+        if (lastSampleMs > 0) staleMs = lastSampleMs
+    }
+
+    // What belongs to the running tracking only (the plots keep their history).
     function resetCpuTrack() {
         cpuPrev = null
-        cpuSamples = []
         cpuLoad = ""
         procPrev = ({})
         processes = []
         procSeen = false
-        cpuCanvas.requestPaint()
     }
 
     function resetSystemInfo() {
@@ -258,6 +338,20 @@ Rectangle {
                 exportKeysDialog.exportPath = ""
                 exportKeysDialog.exportError = error || "Erreur inconnue"
             }
+        }
+
+        function onBackendReply(requestId, success, bodyJson, error) {
+            if (requestId === "midi-info" && success) {
+                var info = JSON.parse(bodyJson).info
+                var merged = {}
+                for (var k in root.midiInfo) merged[k] = root.midiInfo[k]
+                for (var n in info) if (!info[n].error) merged[n] = info[n]
+                root.midiInfo = merged
+            }
+        }
+
+        function onBatchFinished(requestId, success, resultsJson, error) {
+            if (requestId === "ls-midi-batch") onMidiBatch(success, resultsJson, error)
         }
 
         function onCommandFinished(requestId, success, output, error) {
@@ -289,11 +383,18 @@ Rectangle {
             }
             busy = false
             if (requestId === "disk-detail") {
+                diskDetailLoaded = success
                 diskDetailArea.text = success ? parseDiskDetail(output) : ("Erreur: " + error)
                 return
             }
             if (requestId === "system-info") {
-                if (success) { onMemSample(output); onDfSample(output) }
+                if (success) {
+                    onMemSample(output); onDfSample(output)
+                    if (!diskDetailLoaded) {
+                        var all = output.split("\n"), at = all.findIndex(function(l) { return l.indexOf("Filesystem") === 0 })
+                        if (at >= 0) diskDetailArea.text = "<pre style=\"margin:0\">" + fsSummary(all.slice(at)) + "</pre>"
+                    }
+                }
             } else if (requestId === "dmesg") {
                 dmesgArea.text = success ? ansiToHtml(output) : ansiToHtml("Erreur: " + error)
             } else if (requestId === "ls-playlists") {
@@ -301,14 +402,12 @@ Rectangle {
                     var pls = parsePlaylists(output)
                     playlists = pls
                     playlistStatus.text = pls.length + " playlist(s)"
+                    requestMidiInfo(pls)
                 } else {
                     playlistStatus.text = "Erreur: " + error
                 }
             } else if (requestId === "reboot") {
                 rebootStatus.text = success ? "Reboot envoyé." : ("Erreur: " + error)
-            } else if (requestId.indexOf("ls-midi-") === 0) {
-                var mid = parseInt(requestId.substring("ls-midi-".length))
-                recordMidi(mid, success, output)
             }
         }
     }
@@ -348,7 +447,7 @@ Rectangle {
     }
     // Size against the biggest of its list: cool for small, hot for large.
     function sizeColor(frac) {
-        return frac >= 0.75 ? "#e05555" : frac >= 0.4 ? "#e0a030" : frac >= 0.1 ? "#5ac878" : "#6a8fa8"
+        return frac >= 0.75 ? "#d98a7a" : frac >= 0.4 ? "#d4a85a" : frac >= 0.1 ? "#7fbf94" : "#6a8fa8"
     }
     function sizeBar(frac, n) {
         var k = frac > 0 ? Math.max(1, Math.round(n * frac)) : 0
@@ -370,7 +469,7 @@ Rectangle {
         // sample we have (Artila, Pi5, modern Linux). humanKB() turns the
         // 1k-blocks into a readable size.
         SshManager.executeCommand(currentMachine().id,
-            "grep -E '^(MemTotal|MemFree|Buffers|Cached):' /proc/meminfo && df", "system-info")
+            "cat /proc/meminfo; df", "system-info")
     }
 
     // The kernel log carries ANSI colors (m_seq_sim's progress lines: ESC[<codes>m,
@@ -440,6 +539,26 @@ Rectangle {
         SshManager.executeCommand(id, cmd, "disk-detail")
     }
 
+    // The filesystems, as the top of the disk summary: each mount with its
+    // percentage and used / total first and the bar last, so a narrow pane cuts
+    // the bar, not the figures (`df` lines, header first). The root's usage
+    // (what the DISQUE tile used to show) sits in the pane's top line.
+    function fsSummary(dfLines) {
+        var rows = dfLines.slice(1).map(function(l) { return l.trim().split(/\s+/) }).filter(function(f) {
+            return f.length >= 6 && /^\d+$/.test(f[1]) && parseInt(f[1]) > 0
+        })
+        var t = heading("Systèmes de fichiers")
+        t += "\n"
+        rows.forEach(function(f) {
+            var frac = parseInt(f[2]) / parseInt(f[1])
+            t += "  " + span("#8fc4ff", esc(padR(f[5], 12)))
+               + span(sizeColor(frac), padL(f[4], 5)) + "  "
+               + padL(humanKB(parseInt(f[2])), 9) + span("#777", " / ") + padR(humanKB(parseInt(f[1])), 9) + " "
+               + span(sizeColor(frac), sizeBar(frac, 16)) + "\n"
+        })
+        return t
+    }
+
     function parseDiskDetail(output) {
         var sec = {}, cur = ""
         output.split("\n").forEach(function(l) {
@@ -474,17 +593,7 @@ Rectangle {
         var other = home >= 0 ? Math.max(0, home - Math.max(midi, 0) - Math.max(lists, 0) - binKb) : -1
 
         // Columns, in a <pre>: label 26 | bar 20 | size 9 | share 5.
-        var t = heading("Systèmes de fichiers") + "\n"
-        ;(sec["df"] || []).slice(1).forEach(function(l) {
-            var f = l.trim().split(/\s+/)
-            if (f.length >= 6 && /^\d+$/.test(f[1]) && parseInt(f[1]) > 0) {
-                var frac = parseInt(f[2]) / parseInt(f[1])
-                t += "  " + span("#8fc4ff", esc(padR(f[5], 16)))
-                   + span(sizeColor(frac), sizeBar(frac, 20)) + " "
-                   + padL(humanKB(parseInt(f[2])), 9) + span("#777", " / ") + padR(humanKB(parseInt(f[1])), 9)
-                   + span(sizeColor(frac), padL(f[4], 5)) + "\n"
-            }
-        })
+        var t = fsSummary(sec["df"] || [])
         t += "\n" + heading("Répertoire personnel") + span("#9ab", "  " + (home >= 0 ? humanKB(home) : "?")) + "\n"
         function row(label, kb, color) {
             if (kb < 0) return "  " + span(color, esc(padR(label, 26))) + "?\n"
@@ -574,6 +683,72 @@ Rectangle {
     }
 
     property var playlists: []
+    property var midiInfo: ({})               // MIDI file name -> what the file says (backend /api/midi/info)
+
+    // One request for every file the playlists name: the backend reads them in
+    // a single ssh session and parses length, tempo, tracks and channels.
+    function requestMidiInfo(pls) {
+        var seen = {}, files = []
+        pls.forEach(function(p) { p.entries.forEach(function(e) {
+            if (e.file && !seen[e.file]) { seen[e.file] = true; files.push(e.file) }
+        }) })
+        if (files.length === 0) return
+        var id = currentMachine().id
+        SshManager.callBackend("/api/midi/info",
+            JSON.stringify({ machineType: id, dir: MachinePaths.midiPath(id), files: files }), "midi-info")
+    }
+
+    function fmtDur(sec) {
+        sec = Math.round(sec)
+        var h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60
+        return h > 0 ? h + ":" + (m < 10 ? "0" : "") + m + ":" + (s < 10 ? "0" : "") + s
+                     : m + ":" + (s < 10 ? "0" : "") + s
+    }
+    function fmtChannels(ch) {          // [1,2,3,4,10] -> "1-4,10"
+        var out = [], i = 0
+        while (i < ch.length) {
+            var j = i
+            while (j + 1 < ch.length && ch[j + 1] === ch[j] + 1) j++
+            out.push(j - i >= 2 ? ch[i] + "-" + ch[j] : ch.slice(i, j + 1).join(","))
+            i = j + 1
+        }
+        return out.join(",")
+    }
+
+    // Playlists with their MIDI facts and the text widths that fit them: each
+    // column is as wide as its longest row, no wider.
+    function buildPlaylistsView(pls, info) {
+        var maxDur = 1
+        pls.forEach(function(p) { p.entries.forEach(function(e) {
+            var i = info[e.file]; if (i && i.durationSec) maxDur = Math.max(maxDur, i.durationSec)
+        }) })
+        return pls.map(function(p) {
+            var total = 0, known = 0
+            var rows = p.entries.map(function(e) {
+                var i = info[e.file]
+                var ok = i && i.durationSec !== undefined
+                if (ok) { total += i.durationSec; known++ }
+                var tip = e.file
+                if (ok) tip += "\n" + i.tracks + " pistes · " + i.notes + " notes · " + i.timeSig + " · " + i.ppq + " ppq"
+                              + "\ncanaux " + fmtChannels(i.channels)
+                              + (i.tempoChanges > 1 ? "\n" + i.tempoChanges + " changements de tempo" : "")
+                return {
+                    slot: e.slot, label: e.pseudo !== "" ? e.pseudo : e.file, loop: e.loop, chain: e.chain,
+                    dur: ok ? fmtDur(i.durationSec) : "", durFrac: ok ? i.durationSec / maxDur : 0,
+                    bpm: ok ? String(Math.round(i.bpm)) : "", ch: ok ? fmtChannels(i.channels) : "", tip: tip
+                }
+            })
+            function w(key) { return rows.reduce(function(a, r) { return Math.max(a, String(r[key]).length) }, 0) }
+            return {
+                name: p.name, active: p.active, count: rows.length,
+                total: known > 0 ? fmtDur(total) + (known < rows.length ? "+" : "") : "",
+                rows: rows, labelChars: w("label"), durChars: w("dur"), bpmChars: w("bpm"), chChars: w("ch")
+            }
+        })
+    }
+    readonly property var playlistsView: buildPlaylistsView(playlists, midiInfo)
+    TextMetrics { id: monoM; font.family: "Menlo"; font.pixelSize: 11; text: "0000000000" }
+    readonly property real charW: monoM.advanceWidth / 10
 
     // Master actions: one click for every refresh / every live follow.
     function refreshAll() {
@@ -589,41 +764,46 @@ Rectangle {
     // ✗ (missing) / + (extra not on Maître). Lets the user spot a stale
     // .mid sitting on one siren but not the others.
     property var midiByMachine: ({})
-    property int midiInflight: 0
+    property var midiDown: ({})              // machine id -> why it did not answer
+    // `ls -l` (not `-la`) skips . and ..; the cd makes the absolute path explicit
+    // in errors when Midi/ is missing on a siren. One batch request for all the
+    // machines: the backend logs a single summary and skips unreachable boards.
     function listAllMidi() {
         midiByMachine = {}
-        midiInflight = machines.length
+        midiDown = {}
+        busy = true
         midiStatus.text = "Listing " + machines.length + " machines…"
         midiArea.text = ""
-        for (var i = 0; i < machines.length; i++) {
-            var m = machines[i]
-            var p = MachinePaths.midiPath(m.id)
-            // `ls -l` (not `-la`) skips . and ..; the cd makes the absolute
-            // path explicit in errors when Midi/ is missing on a siren.
-            SshManager.executeCommand(m.id,
-                "cd " + p + " && ls -l", "ls-midi-" + m.id)
-        }
+        var items = machines.map(function(m) {
+            return { machineType: m.id, command: "cd " + MachinePaths.midiPath(m.id) + " && ls -l" }
+        })
+        SshManager.executeBatch(JSON.stringify(items), "ls-midi-batch")
     }
-    function recordMidi(machineId, success, output) {
-        var entries = []
-        if (success) {
-            var lines = output.split("\n")
-            for (var i = 0; i < lines.length; i++) {
-                var line = lines[i].trim()
-                if (!line || line.charAt(0) !== '-') continue
+    function onMidiBatch(success, resultsJson, error) {
+        busy = false
+        if (!success) {
+            midiStatus.text = "Erreur: " + error
+            return
+        }
+        var results = JSON.parse(resultsJson), byMachine = {}, down = {}
+        results.forEach(function(r, i) {
+            var id = machines[i].id
+            if (!r.success) { down[id] = r.unreachable ? "injoignable" : (r.error || "erreur"); return }
+            var entries = []
+            r.output.split("\n").forEach(function(l) {
+                var line = l.trim()
+                if (!line || line.charAt(0) !== '-') return
                 var f = line.split(/\s+/)
-                if (f.length < 9) continue
+                if (f.length < 9) return
                 // BusyBox ls -l: <perms> <links> <user> <group> <size>
                 //                <month> <day> <time> <name…>
                 entries.push({ name: f.slice(8).join(' '), size: parseInt(f[4]) })
-            }
-        }
-        var copy = {}
-        for (var k in midiByMachine) copy[k] = midiByMachine[k]
-        copy[machineId] = entries
-        midiByMachine = copy
-        midiInflight = Math.max(0, midiInflight - 1)
-        if (midiInflight === 0) renderMidi()
+            })
+            byMachine[id] = entries
+        })
+        midiByMachine = byMachine
+        midiDown = down
+        renderMidi()
     }
     function renderMidi() {
         // Maître is id=0; treat its file set as canonical and annotate
@@ -640,6 +820,10 @@ Rectangle {
         var out = ""
         for (var i = 0; i < machines.length; i++) {
             var m = machines[i]
+            if (midiDown[m.id] !== undefined) {
+                out += heading(m.name) + span("#e05555", " — " + midiDown[m.id]) + "\n\n"
+                continue
+            }
             var entries = midiByMachine[m.id] || []
             out += heading(m.name + (m.id === 0 ? " (référence)" : ""))
                  + span("#777", " — " + entries.length + " fichier(s)") + "\n"
@@ -670,7 +854,9 @@ Rectangle {
             out += "\n"
         }
         midiArea.text = "<pre style=\"margin:0\">" + out + "</pre>"
-        midiStatus.text = "Listing terminé"
+        var downNames = machines.filter(function(m) { return midiDown[m.id] !== undefined }).map(function(m) { return m.name })
+        midiStatus.text = (machines.length - downNames.length) + " / " + machines.length + " joignables"
+                          + (downNames.length > 0 ? " — hors ligne : " + downNames.join(", ") : "")
     }
 
     Timer {
@@ -718,7 +904,10 @@ Rectangle {
                         dmesgArea.text = ""
                         root.lastDmesgText = ""
                         diskDetailArea.text = ""
+                        root.diskDetailLoaded = false
                         root.resetCpuTrack()
+                        root.loadHistory()
+                        root.refreshSystemInfo()
                         root.playlists = []
                         playlistStatus.text = ""
                     }
@@ -747,7 +936,7 @@ Rectangle {
                     Layout.preferredHeight: 32
                     checkable: true
                     checked: trackCpu.checked && trackDmesg.checked
-                    onToggled: { var on = checked; trackCpu.checked = on; trackDmesg.checked = on }
+                    onToggled: { var on = checked; trackCpu.checked = on; trackDmesg.checked = on; root.showKernelThreads = on }
                     ToolTip.visible: hovered && ToolTip.text.length > 0
                     ToolTip.delay: 600
                     ToolTip.text: root.tip("followAll")
@@ -789,7 +978,7 @@ Rectangle {
         // ==================== SYSTEM INFO ====================
         Rectangle {
             SplitView.fillWidth: true
-            SplitView.preferredHeight: 26 + 62 + 190
+            SplitView.preferredHeight: 26 + 190
             SplitView.minimumHeight: 120
             color: "#2a2a2a"; border.color: "#444"; radius: 4
 
@@ -810,40 +999,6 @@ Rectangle {
                         onClicked: refreshSystemInfo()
                     }
                 }
-                // The summary as a task manager gives it: one tile per resource.
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 6
-
-                    GaugeTile {
-                        Layout.fillWidth: true
-                        title: "CPU"
-                        accent: "#5ac878"
-                        readonly property real last: root.cpuSamples.length > 0 ? root.cpuSamples[root.cpuSamples.length - 1] : -1
-                        fraction: last < 0 ? -1 : last / 100
-                        value: last < 0 ? "—" : last.toFixed(0) + " %"
-                        detail: !trackCpu.checked ? "cocher Suivre"
-                                : root.cpuLoad.length > 0 ? root.cpuCores + " c.  charge " + root.cpuLoad
-                                : root.cpuCores + " c."
-                    }
-                    GaugeTile {
-                        Layout.fillWidth: true
-                        title: "MÉMOIRE"
-                        accent: "#5a9ae0"
-                        fraction: root.memTotalKb > 0 && root.memUsedKb >= 0 ? root.memUsedKb / root.memTotalKb : -1
-                        value: fraction < 0 ? "—" : (100 * fraction).toFixed(0) + " %"
-                        detail: fraction < 0 ? "" : root.humanKB(root.memUsedKb) + " / " + root.humanKB(root.memTotalKb)
-                    }
-                    GaugeTile {
-                        Layout.fillWidth: true
-                        title: "DISQUE /"
-                        accent: "#c78fe0"
-                        fraction: root.diskTotalKb > 0 && root.diskUsedKb >= 0 ? root.diskUsedKb / root.diskTotalKb : -1
-                        value: fraction < 0 ? "—" : root.diskPct
-                        detail: fraction < 0 ? "" : root.humanKB(root.diskUsedKb) + " / " + root.humanKB(root.diskTotalKb)
-                    }
-                }
-
                 // CPU plot and disk breakdown side by side, both resizable.
                 StyledSplitView {
                     Layout.fillWidth: true
@@ -851,59 +1006,33 @@ Rectangle {
                     orientation: Qt.Horizontal
                     stateKey: "systemCpuDisk"
 
-                // CPU history, as Activity Monitor draws it: 0-100 % against
-                // time, newest on the right, a filled area under the line. The
-                // plot takes the whole pane; the reading and the box float over
-                // its top right corner.
+                // CPU and memory history, as Activity Monitor draws them: 0-100 %
+                // against time, newest on the right. Two plots share the pane; each
+                // reading and its controls float over the plot's top right corner.
                 Rectangle {
                     SplitView.fillWidth: true
                     SplitView.minimumWidth: 200
                     color: "#111"; border.color: "#444"
 
-                    Canvas {
-                        id: cpuCanvas
+                    ColumnLayout {
                         anchors.fill: parent
-                        onWidthChanged: requestPaint()
-                        onHeightChanged: requestPaint()
-                        onPaint: {
-                            var ctx = getContext("2d")
-                            var w = width, h = height
-                            ctx.reset()
-                            ctx.fillStyle = "#111"
-                            ctx.fillRect(0, 0, w, h)
-                            ctx.strokeStyle = "#333"
-                            ctx.lineWidth = 1
-                            ctx.beginPath()
-                            for (var g = 1; g < 4; g++) {          // 25, 50, 75 %
-                                var gy = Math.round(h * g / 4) + 0.5
-                                ctx.moveTo(0, gy); ctx.lineTo(w, gy)
-                            }
-                            ctx.stroke()
-                            var data = root.cpuSamples
-                            if (data.length < 2) return
-                            var step = w / (root.cpuHistory - 1)
-                            var x0 = w - (data.length - 1) * step
-                            function y(v) { return h - (v / 100) * (h - 2) - 1 }
-                            ctx.beginPath()
-                            ctx.moveTo(x0, h)
-                            for (var i = 0; i < data.length; i++) ctx.lineTo(x0 + i * step, y(data[i]))
-                            ctx.lineTo(w, h)
-                            ctx.closePath()
-                            ctx.fillStyle = "rgba(90, 200, 120, 0.30)"
-                            ctx.fill()
-                            ctx.beginPath()
-                            for (var j = 0; j < data.length; j++) {
-                                if (j === 0) ctx.moveTo(x0, y(data[0]))
-                                else ctx.lineTo(x0 + j * step, y(data[j]))
-                            }
-                            ctx.strokeStyle = "#5ac878"
-                            ctx.lineWidth = 1.5
-                            ctx.stroke()
-                        }
-                    }
+                        spacing: 1
 
-                    Rectangle {
-                        anchors.top: parent.top
+                        Item {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+
+                            SparkPlot {
+                                id: cpuPlot
+                                anchors.fill: parent
+                                samples: root.cpuSamples
+                                history: root.cpuHistory
+                                staleCount: root.staleCount
+                                staleLabel: root.staleLabel
+                            }
+
+                            Rectangle {
+                                anchors.top: parent.top
                         anchors.right: parent.right
                         anchors.topMargin: 4
                         anchors.rightMargin: 4
@@ -921,11 +1050,13 @@ Rectangle {
                                       : root.cpuSamples.length > 0
                                         ? "CPU " + root.cpuSamples[root.cpuSamples.length - 1].toFixed(0) + " %"
                                         : "CPU …"
-                                color: "white"; font.pixelSize: 12; font.family: "Menlo"; font.bold: true
+                                color: "#c3ccd4"; font.pixelSize: 12; font.family: "Menlo"
+                                HoverHandler { cursorShape: Qt.PointingHandCursor }
+                                TapHandler { onTapped: trackCpu.checked = !trackCpu.checked }
                             }
                             Label {
                                 visible: trackCpu.checked && root.cpuLoad.length > 0
-                                text: "charge " + root.cpuLoad
+                                text: root.cpuCores + " c.  charge " + root.cpuLoad
                                 color: "#888"; font.pixelSize: 11; font.family: "Menlo"
                             }
                             CheckBox {
@@ -936,7 +1067,42 @@ Rectangle {
                                 text: "Suivre"
                                 Layout.preferredHeight: 24
                                 padding: 0
-                                onCheckedChanged: root.resetCpuTrack()
+                                onCheckedChanged: { root.resetCpuTrack(); if (checked) root.markStale() }
+                            }
+                        }
+                    }
+                        }
+
+                        Item {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+
+                            SparkPlot {
+                                anchors.fill: parent
+                                samples: root.memSamples
+                                history: root.cpuHistory
+                                staleCount: root.staleCount
+                                staleLabel: root.staleLabel
+                            }
+
+                            Rectangle {
+                                anchors.top: parent.top
+                                anchors.right: parent.right
+                                anchors.topMargin: 4
+                                anchors.rightMargin: 4
+                                width: memLabel.implicitWidth + 12
+                                height: memLabel.implicitHeight + 8
+                                radius: 5
+                                color: "#d92a2a2a"; border.color: "#555"
+                                Label {
+                                    id: memLabel
+                                    anchors.centerIn: parent
+                                    text: root.memTotalKb > 0 && root.memUsedKb >= 0
+                                          ? "MÉM " + Math.round(100 * root.memUsedKb / root.memTotalKb) + " %   "
+                                            + root.humanKB(root.memUsedKb) + " / " + root.humanKB(root.memTotalKb)
+                                          : "MÉM"
+                                    color: "#c3ccd4"; font.pixelSize: 12; font.family: "Menlo"
+                                }
                             }
                         }
                     }
@@ -957,9 +1123,25 @@ Rectangle {
                             font.family: "Menlo"
                             font.pixelSize: 12
                             wrapMode: TextEdit.NoWrap
-                            leftPadding: 6; topPadding: 4; rightPadding: 6; bottomPadding: 4
+                            leftPadding: 6; topPadding: 32; rightPadding: 6; bottomPadding: 4     // below the floating controls
                             placeholderText: "Détail disque: MIDI, playlists, binaires"
                             background: null
+                        }
+                    }
+
+                    // The root's usage, left aligned on the refresh button's line.
+                    Label {
+                        anchors.left: parent.left
+                        anchors.leftMargin: 8
+                        y: 4 + (diskControls.implicitHeight + 6 - height) / 2
+                        textFormat: Text.RichText
+                        font.pixelSize: 12; font.family: "Menlo"
+                        text: {
+                            if (root.diskTotalKb <= 0 || root.diskUsedKb < 0) return "<span style='color:#888'><b>DISQUE /</b></span>"
+                            var frac = root.diskUsedKb / root.diskTotalKb
+                            return "<span style='color:#888'><b>DISQUE /</b></span>  <b><span style='color:" + root.sizeColor(frac) + "'>"
+                                   + root.diskPct + "</span></b>  <span style='color:#9ab'>"
+                                   + root.humanKB(root.diskUsedKb) + " / " + root.humanKB(root.diskTotalKb) + "</span>"
                         }
                     }
 
@@ -977,9 +1159,11 @@ Rectangle {
                             id: diskControls
                             anchors.centerIn: parent
                             spacing: 8
-                            Label { text: "DISQUE"; color: "#888"; font.pixelSize: 11; font.bold: true }
                             Button {
-                                text: "Détail disque"
+                                text: "↻"
+                                Accessible.name: "Rafraîchir le détail disque"
+                                font.pixelSize: 15
+                                Layout.preferredWidth: 28
                                 ToolTip.visible: hovered && ToolTip.text.length > 0
                                 ToolTip.delay: 600
                                 ToolTip.text: root.tip("diskDetail")
@@ -1149,7 +1333,11 @@ Rectangle {
                     id: dmesgControls
                     anchors.centerIn: parent
                     spacing: 6
-                    Label { text: "DMESG"; color: "#888"; font.pixelSize: 11; font.bold: true }
+                    Label {
+                        text: "DMESG"; color: "#888"; font.pixelSize: 11; font.bold: true
+                        HoverHandler { cursorShape: Qt.PointingHandCursor }
+                        TapHandler { onTapped: trackDmesg.checked = !trackDmesg.checked }
+                    }
                     CheckBox {
                         id: trackDmesg
                         ToolTip.visible: hovered && ToolTip.text.length > 0
@@ -1206,9 +1394,17 @@ Rectangle {
                     spacing: 6
 
                     Repeater {
-                        model: root.playlists
+                        model: root.playlistsView
                         delegate: Rectangle {
-                            width: 250; height: plRow.height
+                            id: plBox
+                            readonly property real cw: root.charW
+                            readonly property real rowsW: cw * 2 + 6 + cw * modelData.labelChars
+                                + (modelData.durChars > 0 ? 6 + cw * modelData.durChars : 0)
+                                + (modelData.bpmChars > 0 ? 6 + cw * modelData.bpmChars : 0)
+                                + (modelData.chChars > 0 ? 6 + cw * modelData.chChars : 0) + 6 + 20
+                            // As wide as its longest row (or its title), no wider.
+                            width: Math.max(plTitle.implicitWidth + 8, rowsW + 8 + 12)
+                            height: plRow.height
                             color: "#1e1e1e"; border.color: modelData.active ? "#ff9f1a" : "#444"
 
                             ColumnLayout {
@@ -1216,8 +1412,10 @@ Rectangle {
                                 anchors.margins: 4
                                 spacing: 2
                                 Label {
+                                    id: plTitle
                                     Layout.fillWidth: true
-                                    text: (modelData.active ? "★ " : "") + modelData.name + "  (" + modelData.entries.length + ")"
+                                    text: (modelData.active ? "★ " : "") + modelData.name + "  (" + modelData.count + ")"
+                                          + (modelData.total !== "" ? "  ·  " + modelData.total : "")
                                     color: modelData.active ? "#ff9f1a" : "#9ab"
                                     font.pixelSize: 11; font.bold: true
                                     elide: Text.ElideRight
@@ -1226,30 +1424,45 @@ Rectangle {
                                     Layout.fillWidth: true
                                     Layout.fillHeight: true
                                     clip: true
-                                    model: modelData.entries
+                                    model: modelData.rows
                                     boundsBehavior: Flickable.StopAtBounds
                                     ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
                                     delegate: Item {
+                                        id: plRowItem
+                                        readonly property var r: modelData
                                         width: ListView.view.width; height: 20
                                         ToolTip.visible: hov.hovered
                                         ToolTip.delay: 600
-                                        ToolTip.text: modelData.file
+                                        ToolTip.text: r.tip
                                         HoverHandler { id: hov }
                                         Row {
                                             anchors.verticalCenter: parent.verticalCenter
                                             spacing: 6
-                                            Label { width: 20; horizontalAlignment: Text.AlignRight; text: modelData.slot; color: "#777"; font.family: "Menlo"; font.pixelSize: 11 }
+                                            Label { width: plBox.cw * 2; horizontalAlignment: Text.AlignRight; text: plRowItem.r.slot; color: "#777"; font.family: "Menlo"; font.pixelSize: 11 }
+                                            Label { width: plBox.cw * plBox.modelDataChars("labelChars"); text: plRowItem.r.label; color: "#ddd"; font.family: "Menlo"; font.pixelSize: 11 }
                                             Label {
-                                                width: 150
-                                                text: modelData.pseudo !== "" ? modelData.pseudo : modelData.file
-                                                color: "#ccc"; font.family: "Menlo"; font.pixelSize: 11
-                                                elide: Text.ElideRight
+                                                visible: width > 0
+                                                width: plBox.cw * plBox.modelDataChars("durChars"); horizontalAlignment: Text.AlignRight
+                                                text: plRowItem.r.dur
+                                                color: root.sizeColor(plRowItem.r.durFrac); font.family: "Menlo"; font.pixelSize: 11
                                             }
-                                            Label { text: (modelData.loop ? "↻" : "") + (modelData.chain ? "⛓" : ""); color: "#5a9ae0"; font.pixelSize: 11 }
+                                            Label {
+                                                visible: width > 0
+                                                width: plBox.cw * plBox.modelDataChars("bpmChars"); horizontalAlignment: Text.AlignRight
+                                                text: plRowItem.r.bpm; color: "#8fc4ff"; font.family: "Menlo"; font.pixelSize: 11
+                                            }
+                                            Label {
+                                                visible: width > 0
+                                                width: plBox.cw * plBox.modelDataChars("chChars")
+                                                text: plRowItem.r.ch; color: "#c78fe0"; font.family: "Menlo"; font.pixelSize: 11
+                                            }
+                                            Label { width: 20; text: (plRowItem.r.loop ? "↻" : "") + (plRowItem.r.chain ? "⛓" : ""); color: "#5a9ae0"; font.pixelSize: 11 }
                                         }
                                     }
                                 }
                             }
+
+                            function modelDataChars(key) { return modelData[key] }
                         }
                     }
 

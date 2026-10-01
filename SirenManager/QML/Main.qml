@@ -35,8 +35,14 @@ ApplicationWindow {
                 category: "MainWindow"
                 property int lastTab: 0
             }
-            Component.onCompleted: if (appState.lastTab >= 0 && appState.lastTab < count) currentIndex = appState.lastTab
-            onCurrentIndexChanged: if (currentIndex >= 0) appState.lastTab = currentIndex
+            // The saved tab is applied once the tabs exist; nothing is saved before
+            // that, or the initial index would overwrite it.
+            property bool restored: false
+            Component.onCompleted: Qt.callLater(function() {
+                if (appState.lastTab >= 0 && appState.lastTab < count) currentIndex = appState.lastTab
+                restored = true
+            })
+            onCurrentIndexChanged: if (restored && currentIndex >= 0) appState.lastTab = currentIndex
             
             background: Rectangle {
                 color: "#2a2a2a"

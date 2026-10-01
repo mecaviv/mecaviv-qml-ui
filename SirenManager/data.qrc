@@ -17,6 +17,7 @@
         
         <!-- Components -->
         <file>QML/components/SirenButton.qml</file>
+        <file>QML/components/SparkPlot.qml</file>
         <file>QML/components/PlaylistSlot.qml</file>
         <file>QML/components/ClockDisplay.qml</file>
         <file>QML/components/MidiController.qml</file>

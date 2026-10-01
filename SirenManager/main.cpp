@@ -70,6 +70,13 @@ int main(int argc, char *argv[])
 
     // Créer le moteur QML
     QQmlApplicationEngine engine;
+    // Debug builds pad the System tab's plots with random past data, so they can
+    // be styled without waiting for samples.
+#ifdef QT_DEBUG
+    engine.rootContext()->setContextProperty(QStringLiteral("isDebugBuild"), true);
+#else
+    engine.rootContext()->setContextProperty(QStringLiteral("isDebugBuild"), false);
+#endif
 
     // Ajouter le chemin des ressources
     const QUrl url(QStringLiteral("qrc:/SirenManager/QML/Main.qml"));
