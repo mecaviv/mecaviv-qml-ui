@@ -231,7 +231,9 @@ aujourd'hui), soit le générer depuis la même source.
 - **Récepteurs introuvables** : `PRESET_UPDATED_FROM_PUPITRE`, `MIDI_NOTES`, `MIDI_NOTE`.
 - **Un flux PureData, deux décodeurs en désaccord** (§ 3) : `0x01`, `0x04` et `0x06` n'ont pas le
   même sens pour le pupitre et pour la console. À trancher dans `M645.pd` avant de figer `Shared`.
-- **`VOLANT_DATA` a deux formes** selon qui l'émet (`noteFloat` ou `note` + `pitchbend`).
+- **`VOLANT_DATA` a deux formes** selon qui l'émet (`noteFloat` ou `note` + `pitchbend`) ; le
+  client ignore la seconde. **Le pitch bend du volant** est converti sur ±1 demi-ton par la console
+  et sur ±2 par le pupitre (trame `0x03`).
 - **Joystick (trame `0x02`)** : le commentaire dit « 128–255 = −0 à −127 », le code calcule
   `octet − 255` (128 → −127, 255 → 0). Concerne le joystick, en refonte.
 - **Deux discriminants**, `type` et `device` (§ 2).
@@ -283,8 +285,8 @@ MIDI » du § 2, les routes `/api/presets` du § 4, et le flux PureData côté c
 
 | Fichier | Suivi par git | Lu par | Contenu |
 |---|---|---|---|
-| `config.json` (racine) | **non** (`.gitignore`, ligne 92), aucun modèle versionné | `config-loader.js` → `SirenConsole/webfiles/server.js`, `api-midi.js` (lève une erreur s'il manque) | la configuration d'un **pupitre** (voir ci-dessous), plus `servers` et `paths.midiRepository` |
-| `SirenConsole/config.js` et `SirenConsole/webfiles/config.js` | oui, **deux copies qui divergent** (P2 : `localhost` contre `192.168.1.42`) | QML (`ConfigManager` : `webfiles/config.js` en HTTP, puis `config.js`, aussi embarqué dans `data.qrc`), `puredata-proxy.js` | `pupitres[]`, `ui`, `presets` (anciens, en objet), `colors`, `servers.websocket`, `sirenAssignment` |
+| `config.json` (racine) | **non** (`.gitignore`, ligne 92), local à chaque machine ; modèle versionné : `config.template.json` | `config-loader.js` → `SirenConsole/webfiles/server.js`, `api-midi.js` (lève une erreur s'il manque) | la configuration d'un **pupitre** (voir ci-dessous), plus `servers` et `paths.midiRepository` |
+| `SirenConsole/config.js` (et une copie `webfiles/config.js` qui divergeait, lue par rien) | oui | `server.js` (`require('../config.js')`, servi sous `/config.js`), `puredata-proxy.js`. Le QML (`ConfigManager`) tente de le charger mais **n'y parvient jamais** (sa regex ne trouve pas l'objet, et le fichier n'est pas du JSON) : la console tourne sur les valeurs par défaut écrites dans `ConfigManager.qml`, et lit `config.sirens`, qu'aucune source ne fournit | `pupitres[]`, `ui`, `presets` (anciens, en objet), `colors`, `servers.websocket`, `sirenAssignment` |
 | `SirenePupitre/config.js` | oui | QML du pupitre (`var configData = …`, pas un module Node) | `serverUrl`, `admin`, `controllersPanel`, `ui`, `midiFiles`, `sirenConfig`, `calibration`, `displayConfig`, `outputConfig`, `composeSiren` |
 
 ### La configuration d'un pupitre (`CONFIG_FULL.config`)
@@ -326,10 +328,10 @@ Les anciens presets de `config.js` (« Concert Standard », « Mode Fretté »�
   pupitre ;
 - un type `Preset` à **un seul** format, avec une lecture tolérante des deux anciens pour migrer
   `presets.json` une fois ;
-- `config.json` versionné en modèle (`config.example.json`), la partie machine (adresses, chemins)
-  séparée de la partie musicale ;
-- une seule copie de la configuration de la console, servie par le serveur F# (fin des deux
-  `config.js`).
+- `config.template.json` (le modèle existant) tenu à jour avec les types réels, la partie machine
+  (adresses, chemins) séparée de la partie musicale ;
+- une seule configuration de la console, servie **en JSON** par le serveur F# et réellement lue
+  par le client (aujourd'hui le QML ne lit jamais `config.js`).
 
 ## 7. Mesure de référence : SirenConsole avant Fable
 
