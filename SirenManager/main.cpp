@@ -15,6 +15,10 @@
 
 int main(int argc, char *argv[])
 {
+    // QML reads its tooltip CSV (a qrc resource) with XMLHttpRequest, which Qt
+    // blocks for local files unless this is set before the engine is created.
+    qputenv("QML_XHR_ALLOW_FILE_READ", "1");
+
     QGuiApplication app(argc, argv);
 
     // Configuration de l'application

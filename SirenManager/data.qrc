@@ -1,6 +1,7 @@
 <RCC>
     <qresource prefix="/SirenManager">
         <file>QML/Main.qml</file>
+        <file>QML/data/system_tooltips.csv</file>
         
         <!-- Views -->
         <file>QML/views/PlayerView.qml</file>

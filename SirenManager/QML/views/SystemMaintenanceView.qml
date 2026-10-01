@@ -9,6 +9,26 @@ Rectangle {
     id: root
     color: "#1e1e1e"
 
+    // Tooltip texts, one "key;text" per line in data/system_tooltips.csv
+    // ("\n" in the text is a line break, kept short so the tooltip stays narrow).
+    property var tips: ({})
+    function tip(key) { return tips[key] || "" }
+    Component.onCompleted: {
+        var xhr = new XMLHttpRequest()
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState !== XMLHttpRequest.DONE) return
+            var t = {}
+            xhr.responseText.split("\n").forEach(function(line) {
+                var i = line.indexOf(";")
+                if (i > 0 && line.charAt(0) !== "#")
+                    t[line.slice(0, i).trim()] = line.slice(i + 1).trim().replace(/\\n/g, "\n")
+            })
+            root.tips = t
+        }
+        xhr.open("GET", Qt.resolvedUrl("../data/system_tooltips.csv"))
+        xhr.send()
+    }
+
     // MachineType enum values mirrored in QML (see src/Config/MachineType.h).
     // Paths come from MachinePaths so they stay in sync with PlaylistComposerView.
     readonly property var machines: [
@@ -78,7 +98,8 @@ Rectangle {
         SshManager.executeCommand(currentMachine().id,
             "grep '^cpu' /proc/stat; cat /proc/loadavg;"
             + " grep -E '^(MemTotal|MemFree|Buffers|Cached):' /proc/meminfo;"
-            + " cat /proc/[0-9]*/stat 2>/dev/null", "cpu-track")
+            + " cat /proc/[0-9]*/stat 2>/dev/null;"
+            + " grep '^Uid:' /proc/[0-9]*/status 2>/dev/null; cat /etc/passwd 2>/dev/null", "cpu-track")
     }
 
     function onCpuSample(output) {
@@ -123,6 +144,14 @@ Rectangle {
     // units of one core (a busy thread on a 4 core box reads 100 %, not 25 %).
     function onProcessSample(output, dTotal) {
         var list = [], now = {}
+        // Owners: "/proc/<pid>/status:Uid:<uid>..." lines, named from /etc/passwd.
+        var uidOf = {}, nameOf = {}
+        output.split("\n").forEach(function(line) {
+            var u = line.match(/^\/proc\/(\d+)\/status:Uid:\s+(\d+)/)
+            if (u) { uidOf[u[1]] = u[2]; return }
+            var p = line.match(/^([^:\s]+):[^:]*:(\d+):\d+:/)
+            if (p) nameOf[p[2]] = p[1]
+        })
         output.split("\n").forEach(function(line) {
             var m = line.match(/^(\d+) \((.*)\) (\S) (.*)$/)
             if (!m) return
@@ -134,8 +163,11 @@ Rectangle {
             var cpu = (prev !== undefined && dTotal > 0) ? 100 * cpuCores * (jiffies - prev) / dTotal : 0
             list.push({
                 pid: pid, name: m[2], state: m[3],
+                ppid: parseInt(r[0]),
+                user: uidOf[pid] === undefined ? "?" : (nameOf[uidOf[pid]] || uidOf[pid]),
                 cpu: Math.max(0, cpu),
                 rssKb: parseInt(r[20]) * 4,              // pages of 4 kB
+                virtKb: Math.round(parseInt(r[19]) / 1024),
                 threads: parseInt(r[16])
             })
         })
@@ -145,12 +177,52 @@ Rectangle {
         processes = list
     }
 
+    readonly property var procColumns: [
+        { key: "user",  label: "USER",  w: 64,  right: false },
+        { key: "pid",   label: "PID",   w: 46,  right: true  },
+        { key: "ppid",  label: "PPID",  w: 46,  right: true  },
+        { key: "name",  label: "NOM",   w: -1,  right: false },
+        { key: "state", label: "ÉT.",   w: 26,  right: false },
+        { key: "thr",   label: "THR",   w: 34,  right: true  },
+        { key: "cpu",   label: "CPU %", w: 52,  right: true  },
+        { key: "mem",   label: "MÉM",   w: 66,  right: true  },
+        { key: "virt",  label: "VIRT",  w: 66,  right: true  }
+    ]
+    function procCell(p, key) {
+        switch (key) {
+        case "user": return p.user
+        case "pid": return p.pid
+        case "ppid": return p.ppid
+        case "name": return p.name
+        case "state": return p.state
+        case "thr": return p.threads
+        case "cpu": return p.cpu.toFixed(1)
+        case "mem": return humanKB(p.rssKb)
+        default: return humanKB(p.virtKb)
+        }
+    }
+    function procColor(p, key) {
+        switch (key) {
+        case "user": return p.user === "root" ? "#e0a030" : "#8fc4ff"
+        case "pid": case "ppid": return "#777"
+        case "name": return "#ddd"
+        case "state": return p.state === "R" ? "#5ac878" : (p.state === "D" || p.state === "Z") ? "#e05555" : p.state === "T" ? "#e0a030" : "#888"
+        case "thr": return p.threads > 1 ? "#bbb" : "#666"
+        case "cpu": return p.cpu >= 50 ? "#e05555" : p.cpu >= 10 ? "#e0a030" : p.cpu > 0 ? "#5ac878" : "#666"
+        default: return "#9ab"
+        }
+    }
     function sortedProcesses() {
         var key = procSort
         var list = processes.filter(function(p) { return showKernelThreads || p.rssKb > 0 })
         list.sort(function(a, b) {
             if (key === "name") return a.name < b.name ? -1 : a.name > b.name ? 1 : a.pid - b.pid
+            if (key === "user") return a.user < b.user ? -1 : a.user > b.user ? 1 : a.pid - b.pid
+            if (key === "state") return a.state < b.state ? -1 : a.state > b.state ? 1 : a.pid - b.pid
             if (key === "pid") return a.pid - b.pid
+            if (key === "ppid") return a.ppid - b.ppid || a.pid - b.pid
+            if (key === "thr") return b.threads - a.threads || a.pid - b.pid
+            if (key === "virt") return b.virtKb - a.virtKb || a.pid - b.pid
             if (key === "mem") return b.rssKb - a.rssKb || a.pid - b.pid
             return b.cpu - a.cpu || b.rssKb - a.rssKb || a.pid - b.pid
         })
@@ -226,12 +298,9 @@ Rectangle {
                 dmesgArea.text = success ? ansiToHtml(output) : ansiToHtml("Erreur: " + error)
             } else if (requestId === "ls-playlists") {
                 if (success) {
-                    var lines = output.split("\n").filter(function(l) { return l.trim().length > 0 })
-                    playlistsModel.clear()
-                    for (var i = 0; i < lines.length; i++) {
-                        playlistsModel.append({ name: lines[i] })
-                    }
-                    playlistStatus.text = lines.length + " playlist(s) trouvée(s)"
+                    var pls = parsePlaylists(output)
+                    playlists = pls
+                    playlistStatus.text = pls.length + " playlist(s)"
                 } else {
                     playlistStatus.text = "Erreur: " + error
                 }
@@ -264,8 +333,33 @@ Rectangle {
     function humanKB(kb) {
         if (kb >= 1024 * 1024) return (kb / 1024 / 1024).toFixed(1) + " GB"
         if (kb >= 1024) return (kb / 1024).toFixed(1) + " MB"
-        return kb + " KB"
+        return Math.round(kb) + " KB"
     }
+
+    // ---- shared text formatting (disk detail, MIDI listing) ----
+    function esc(t) { return String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") }
+    function padR(t, n) { t = String(t); while (t.length < n) t += " "; return t }
+    function padL(t, n) { t = String(t); while (t.length < n) t = " " + t; return t }
+    function span(color, text) { return "<span style=\"color:" + color + "\">" + text + "</span>" }
+    function fmtBytes(b) {
+        if (b >= 1048576) return (b / 1048576).toFixed(1) + " MB"
+        if (b >= 1024) return Math.round(b / 1024) + " KB"
+        return b + " B"
+    }
+    // Size against the biggest of its list: cool for small, hot for large.
+    function sizeColor(frac) {
+        return frac >= 0.75 ? "#e05555" : frac >= 0.4 ? "#e0a030" : frac >= 0.1 ? "#5ac878" : "#6a8fa8"
+    }
+    function sizeBar(frac, n) {
+        var k = frac > 0 ? Math.max(1, Math.round(n * frac)) : 0
+        return "█".repeat(k) + "·".repeat(n - k)
+    }
+    function fileColor(name) {
+        return /\.(ko|o|so|bin)$/.test(name) ? "#c78fe0"
+             : /\.midi?$/i.test(name) ? "#8fc4ff"
+             : /\.listlecture$/i.test(name) ? "#e0c070" : "#dddddd"
+    }
+    function heading(t) { return "<span style=\"color:#ff9f1a;font-weight:bold\">" + esc(t) + "</span>" }
 
     function refreshSystemInfo() {
         busy = true
@@ -369,13 +463,7 @@ Rectangle {
             })
             return out
         }
-        function bar(kb, total) {
-            var n = total > 0 ? Math.max(kb > 0 ? 1 : 0, Math.round(20 * kb / total)) : 0
-            return "█".repeat(n) + "·".repeat(20 - n)
-        }
-        function pct(kb, total) { return total > 0 ? (100 * kb / total).toFixed(0) + " %" : "" }
         function sum(list) { return list.reduce(function(a, f) { return a + f.bytes }, 0) / 1024 }
-        function pad(t, n) { t = String(t); while (t.length < n) t += " "; return t }
 
         var home = du("home"), midi = du("midi"), lists = du("playlists")
         var homeFiles = files("homefiles")
@@ -385,40 +473,51 @@ Rectangle {
         var binKb = sum(binaries)
         var other = home >= 0 ? Math.max(0, home - Math.max(midi, 0) - Math.max(lists, 0) - binKb) : -1
 
-        var t = ""
-        t += "Systèmes de fichiers\n"
+        // Columns, in a <pre>: label 26 | bar 20 | size 9 | share 5.
+        var t = heading("Systèmes de fichiers") + "\n"
         ;(sec["df"] || []).slice(1).forEach(function(l) {
             var f = l.trim().split(/\s+/)
-            if (f.length >= 6 && /^\d+$/.test(f[1]) && parseInt(f[1]) > 0)
-                t += "  " + pad(f[5], 16) + humanKB(parseInt(f[2])) + " / " + humanKB(parseInt(f[1])) + "  (" + f[4] + ")\n"
+            if (f.length >= 6 && /^\d+$/.test(f[1]) && parseInt(f[1]) > 0) {
+                var frac = parseInt(f[2]) / parseInt(f[1])
+                t += "  " + span("#8fc4ff", esc(padR(f[5], 16)))
+                   + span(sizeColor(frac), sizeBar(frac, 20)) + " "
+                   + padL(humanKB(parseInt(f[2])), 9) + span("#777", " / ") + padR(humanKB(parseInt(f[1])), 9)
+                   + span(sizeColor(frac), padL(f[4], 5)) + "\n"
+            }
         })
-        t += "\nRépertoire personnel (" + (home >= 0 ? humanKB(home) : "?") + ")\n"
-        function row(label, kb) {
-            if (kb < 0) return "  " + pad(label, 26) + "?\n"
-            return "  " + pad(label, 26) + bar(kb, home) + " " + pad(humanKB(kb), 10) + pct(kb, home) + "\n"
+        t += "\n" + heading("Répertoire personnel") + span("#9ab", "  " + (home >= 0 ? humanKB(home) : "?")) + "\n"
+        function row(label, kb, color) {
+            if (kb < 0) return "  " + span(color, esc(padR(label, 26))) + "?\n"
+            var frac = home > 0 ? kb / home : 0
+            return "  " + span(color, esc(padR(label, 26))) + span(sizeColor(frac), sizeBar(frac, 20)) + " "
+                 + padL(humanKB(kb), 9) + span(sizeColor(frac), padL(home > 0 ? (100 * kb / home).toFixed(0) + " %" : "", 6)) + "\n"
         }
-        t += row("Fichiers MIDI", midi)
-        t += row("Playlists", lists)
-        t += row("Binaires / modules (.ko)", binKb)
-        t += row("Autres (config, logs…)", other)
+        t += row("Fichiers MIDI", midi, "#8fc4ff")
+        t += row("Playlists", lists, "#e0c070")
+        t += row("Binaires / modules (.ko)", binKb, "#c78fe0")
+        t += row("Autres (config, logs…)", other, "#dddddd")
         var tmp = du("tmp"), log = du("log")
         if (tmp >= 0 || log >= 0)
-            t += "\n  /tmp " + (tmp >= 0 ? humanKB(tmp) : "?") + "   /var/log " + (log >= 0 ? humanKB(log) : "?") + "  (mémoire vive)\n"
+            t += "\n  " + span("#888", "/tmp ") + (tmp >= 0 ? humanKB(tmp) : "?") + span("#888", "   /var/log ") + (log >= 0 ? humanKB(log) : "?") + span("#777", "  (mémoire vive)") + "\n"
 
+        // Biggest files of a list: size, a bar against the biggest, then the name.
         function top(title, list, n) {
             if (list.length === 0) return ""
             var sorted = list.slice().sort(function(a, b) { return b.bytes - a.bytes })
-            var out = "\n" + title + " (" + list.length + " fichiers, " + humanKB(sum(list)) + ")\n"
+            var max = sorted[0].bytes
+            var out = "\n" + heading(title) + span("#777", "  " + list.length + " fichiers, " + humanKB(sum(list))) + "\n"
             sorted.slice(0, n).forEach(function(f) {
-                out += "  " + pad(humanKB(f.bytes / 1024), 10) + f.name + "\n"
+                var frac = max > 0 ? f.bytes / max : 0
+                out += "  " + span(sizeColor(frac), padL(fmtBytes(f.bytes), 9) + " " + sizeBar(frac, 10)) + "  "
+                     + span(fileColor(f.name), esc(f.name)) + "\n"
             })
-            if (sorted.length > n) out += "  … " + (sorted.length - n) + " autres\n"
+            if (sorted.length > n) out += span("#777", "  … " + (sorted.length - n) + " autres") + "\n"
             return out
         }
         t += top("Binaires et modules", binaries, 8)
         t += top("Plus gros fichiers MIDI", files("midifiles"), 8)
         t += top("Playlists", files("playlistfiles"), 5)
-        return t
+        return "<pre style=\"margin:0\">" + t + "</pre>"
     }
 
     function scrollDmesgToEnd() {
@@ -433,14 +532,56 @@ Rectangle {
         SshManager.executeCommand(currentMachine().id, cmd, "dmesg")
     }
 
+    // One ssh round trip: every playlist file's content, then the pointer
+    // (derniere_liste, "<string>/path/X.ListLecture</string>") naming the
+    // active one. Playlist entries are {[n=slot][s=file][a=pseudo][B=loop][E=chain]}.
     function listPlaylists() {
         var p = MachinePaths.playlistPath(currentMachine().id)
+        var ptr = MachinePaths.derniereListePath(currentMachine().id)
         busy = true
         playlistStatus.text = "Chargement..."
-        SshManager.executeCommand(currentMachine().id, "ls -1 " + p, "ls-playlists")
+        SshManager.executeCommand(currentMachine().id,
+            "cd " + p + " && for f in *; do [ -f \"$f\" ] && echo \"##pl $f\" && cat \"$f\" && echo; done;"
+            + " echo '##active'; cat " + ptr + " 2>/dev/null", "ls-playlists")
     }
 
-    ListModel { id: playlistsModel }
+    function parsePlaylists(output) {
+        var out = [], cur = null, active = ""
+        var inActive = false
+        output.split("\n").forEach(function(line) {
+            if (line.indexOf("##pl ") === 0) {
+                cur = { file: line.substring(5).trim(), content: "" }
+                inActive = false
+                out.push(cur)
+            } else if (line.indexOf("##active") === 0) {
+                cur = null; inActive = true
+            } else if (inActive) {
+                var m = line.match(/<string>([^<]+)<\/string>/)
+                if (m) active = m[1].trim().split("/").pop()
+            } else if (cur) {
+                cur.content += line + "\n"
+            }
+        })
+        var rx = /\{[^}]*\[n=(\d+)\][^}]*\[s=([^\]]*)\][^}]*\[a=([^\]]*)\][^}]*\[B=(\d)\][^}]*\[E=(\d)\][^}]*\}/g
+        return out.filter(function(p) { return p.file !== "ALLLIST" }).map(function(p) {
+            var entries = [], m
+            rx.lastIndex = 0
+            while ((m = rx.exec(p.content)) !== null)
+                entries.push({ slot: parseInt(m[1]), file: m[2], pseudo: m[3], loop: m[4] === "1", chain: m[5] === "1" })
+            entries.sort(function(x, y) { return x.slot - y.slot })
+            return { name: p.file.replace(/\.ListLecture$/i, ""), active: p.file === active, entries: entries }
+        })
+    }
+
+    property var playlists: []
+
+    // Master actions: one click for every refresh / every live follow.
+    function refreshAll() {
+        refreshSystemInfo()
+        requestDiskDetail()
+        refreshDmesg(false)
+        listPlaylists()
+    }
 
     // MIDI cross-machine listing. Fires `ls -l Midi/` on every machine in
     // parallel, collects size + filename, then renders the Maître as
@@ -489,30 +630,32 @@ Rectangle {
         // others against it. Files only on a non-Maître show up tagged "+".
         var ref = midiByMachine[0] || []
         var refMap = {}
+        var maxSize = 1, maxName = 10
         for (var i = 0; i < ref.length; i++) refMap[ref[i].name] = ref[i].size
+        for (var k in midiByMachine) midiByMachine[k].forEach(function(e) {
+            maxSize = Math.max(maxSize, e.size); maxName = Math.max(maxName, e.name.length)
+        })
+        maxName = Math.min(maxName, 40)
 
         var out = ""
         for (var i = 0; i < machines.length; i++) {
             var m = machines[i]
             var entries = midiByMachine[m.id] || []
-            var label = (m.id === 0 ? " (référence)" : "")
-            out += "=== " + m.name + label + " — " + entries.length + " fichier(s) ===\n"
-            // Sort entries by name for consistent display.
+            out += heading(m.name + (m.id === 0 ? " (référence)" : ""))
+                 + span("#777", " — " + entries.length + " fichier(s)") + "\n"
             entries.sort(function(a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0 })
             for (var j = 0; j < entries.length; j++) {
                 var e = entries[j]
-                var sizeStr = ("         " + e.size).slice(-9)
-                var tag = ""
-                if (m.id === 0) {
-                    tag = ""
-                } else if (refMap.hasOwnProperty(e.name)) {
-                    tag = (refMap[e.name] === e.size)
-                            ? "  ✓"
-                            : "  ⚠ (Maître: " + refMap[e.name] + ")"
-                } else {
-                    tag = "  + (absent du Maître)"
+                var frac = e.size / maxSize
+                var tag = "", nameColor = "#dddddd"
+                if (m.id !== 0) {
+                    if (refMap.hasOwnProperty(e.name)) {
+                        if (refMap[e.name] === e.size) tag = span("#5ac878", "✓")
+                        else { tag = span("#e0a030", "⚠ Maître " + fmtBytes(refMap[e.name])); nameColor = "#e0a030" }
+                    } else { tag = span("#8fc4ff", "+ absent du Maître"); nameColor = "#8fc4ff" }
                 }
-                out += sizeStr + "  " + e.name + tag + "\n"
+                out += "  " + span(sizeColor(frac), padL(fmtBytes(e.size), 9)) + "  "
+                     + span(nameColor, esc(padR(e.name, maxName))) + "  " + tag + "\n"
             }
             // For non-Maître machines, list files present on Maître but missing here.
             if (m.id !== 0 && ref.length > 0) {
@@ -521,13 +664,12 @@ Rectangle {
                 var missing = []
                 for (var rname in refMap) if (!present[rname]) missing.push(rname)
                 missing.sort()
-                for (var k = 0; k < missing.length; k++) {
-                    out += "         (absent)  " + missing[k] + "  ✗\n"
-                }
+                for (var q = 0; q < missing.length; q++)
+                    out += "  " + span("#777", padL("absent", 9)) + "  " + span("#e05555", esc(padR(missing[q], maxName))) + "  " + span("#e05555", "✗") + "\n"
             }
             out += "\n"
         }
-        midiArea.text = out
+        midiArea.text = "<pre style=\"margin:0\">" + out + "</pre>"
         midiStatus.text = "Listing terminé"
     }
 
@@ -565,6 +707,9 @@ Rectangle {
                 Label { text: "Machine:"; color: "#aaa"; font.pixelSize: 12 }
                 ComboBox {
                     id: machineCombo
+                    ToolTip.visible: hovered && ToolTip.text.length > 0
+                    ToolTip.delay: 600
+                    ToolTip.text: root.tip("machine")
                     model: machines.map(function(m) { return m.name })
                     Layout.preferredWidth: 200
                     onCurrentIndexChanged: {
@@ -574,7 +719,7 @@ Rectangle {
                         root.lastDmesgText = ""
                         diskDetailArea.text = ""
                         root.resetCpuTrack()
-                        playlistsModel.clear()
+                        root.playlists = []
                         playlistStatus.text = ""
                     }
                 }
@@ -589,22 +734,45 @@ Rectangle {
                 Item { Layout.fillWidth: true }
 
                 Button {
-                    text: "Lister playlists + MIDI"
+                    text: "Tout rafraîchir"
                     Layout.preferredHeight: 32
-                    onClicked: { listPlaylists(); listAllMidi() }
+                    onClicked: refreshAll()
+                    ToolTip.visible: hovered && ToolTip.text.length > 0
+                    ToolTip.delay: 600
+                    ToolTip.text: root.tip("refreshAll")
+                }
+                Button {
+                    id: followAll
+                    text: "Tout suivre"
+                    Layout.preferredHeight: 32
+                    checkable: true
+                    checked: trackCpu.checked && trackDmesg.checked
+                    onToggled: { var on = checked; trackCpu.checked = on; trackDmesg.checked = on }
+                    ToolTip.visible: hovered && ToolTip.text.length > 0
+                    ToolTip.delay: 600
+                    ToolTip.text: root.tip("followAll")
                 }
                 Button {
                     text: "Exporter clés SSH"
+                    ToolTip.visible: hovered && ToolTip.text.length > 0
+                    ToolTip.delay: 600
+                    ToolTip.text: root.tip("exportKeys")
                     Layout.preferredHeight: 32
                     onClicked: exportKeysDialog.open()
                 }
                 Button {
                     text: "Reboot"
+                    ToolTip.visible: hovered && ToolTip.text.length > 0
+                    ToolTip.delay: 600
+                    ToolTip.text: root.tip("reboot")
                     Layout.preferredHeight: 32
                     onClicked: rebootDialog.open()
                 }
                 Button {
                     text: "Reboot all"
+                    ToolTip.visible: hovered && ToolTip.text.length > 0
+                    ToolTip.delay: 600
+                    ToolTip.text: root.tip("rebootAll")
                     Layout.preferredHeight: 32
                     onClicked: rebootAllDialog.open()
                 }
@@ -635,6 +803,9 @@ Rectangle {
                     Item { Layout.fillWidth: true }
                     Button {
                         text: "Rafraîchir"
+                        ToolTip.visible: hovered && ToolTip.text.length > 0
+                        ToolTip.delay: 600
+                        ToolTip.text: root.tip("refresh")
                         Layout.preferredHeight: 26
                         onClicked: refreshSystemInfo()
                     }
@@ -759,6 +930,9 @@ Rectangle {
                             }
                             CheckBox {
                                 id: trackCpu
+                                ToolTip.visible: hovered && ToolTip.text.length > 0
+                                ToolTip.delay: 600
+                                ToolTip.text: root.tip("trackCpu")
                                 text: "Suivre"
                                 Layout.preferredHeight: 24
                                 padding: 0
@@ -778,6 +952,7 @@ Rectangle {
                         TextArea {
                             id: diskDetailArea
                             readOnly: true
+                            textFormat: TextEdit.RichText
                             color: "#ccc"
                             font.family: "Menlo"
                             font.pixelSize: 12
@@ -805,6 +980,9 @@ Rectangle {
                             Label { text: "DISQUE"; color: "#888"; font.pixelSize: 11; font.bold: true }
                             Button {
                                 text: "Détail disque"
+                                ToolTip.visible: hovered && ToolTip.text.length > 0
+                                ToolTip.delay: 600
+                                ToolTip.text: root.tip("diskDetail")
                                 Layout.preferredHeight: 24
                                 onClicked: root.requestDiskDetail()
                             }
@@ -816,8 +994,8 @@ Rectangle {
                 // title to change the key. Fed by the CPU tick, so it moves
                 // with "Suivre" and costs no ssh session of its own.
                 Rectangle {
-                    SplitView.preferredWidth: 400
-                    SplitView.minimumWidth: 220
+                    SplitView.preferredWidth: 560
+                    SplitView.minimumWidth: 300
                     color: "#111"; border.color: "#444"
 
                     ColumnLayout {
@@ -825,24 +1003,40 @@ Rectangle {
                         anchors.margins: 0
                         spacing: 0
 
-                        Item { Layout.preferredHeight: 28 }       // under the floating label
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Layout.leftMargin: 6; Layout.rightMargin: 6
+                            Layout.preferredHeight: 28
+                            spacing: 8
+                            Label {
+                                text: "PROCESSUS" + (root.procSeen ? "  " + procList.count + " / " + root.processes.length : "")
+                                color: "#888"; font.pixelSize: 11; font.bold: true
+                            }
+                            Item { Layout.fillWidth: true }
+                            CheckBox {
+                                text: "Noyau"
+                                ToolTip.visible: hovered && ToolTip.text.length > 0
+                                ToolTip.delay: 600
+                                ToolTip.text: root.tip("kernelThreads")
+                                Layout.preferredHeight: 24
+                                padding: 0
+                                checked: root.showKernelThreads
+                                onToggled: root.showKernelThreads = checked
+                            }
+                        }
 
                         RowLayout {
                             Layout.fillWidth: true
                             Layout.leftMargin: 6; Layout.rightMargin: 16
                             spacing: 4
                             Repeater {
-                                model: [
-                                    { key: "pid",  label: "PID",  w: 44,  right: true  },
-                                    { key: "name", label: "NOM",  w: -1,  right: false },
-                                    { key: "cpu",  label: "CPU %", w: 52, right: true  },
-                                    { key: "mem",  label: "MÉM",  w: 64,  right: true  }
-                                ]
+                                model: root.procColumns
                                 Text {
                                     Layout.preferredWidth: modelData.w
                                     Layout.fillWidth: modelData.w < 0
                                     horizontalAlignment: modelData.right ? Text.AlignRight : Text.AlignLeft
-                                    text: modelData.label + (root.procSort === modelData.key ? (modelData.key === "pid" || modelData.key === "name" ? " ▲" : " ▼") : "")
+                                    text: modelData.label + (root.procSort === modelData.key
+                                          ? (["pid", "ppid", "name", "user", "state"].indexOf(modelData.key) >= 0 ? " ▲" : " ▼") : "")
                                     color: root.procSort === modelData.key ? "#ff9f1a" : "#888"
                                     font.pixelSize: 11; font.bold: true
                                     MouseArea {
@@ -864,6 +1058,8 @@ Rectangle {
                             ScrollBar.vertical: ScrollBar {}
 
                             delegate: Rectangle {
+                                id: procRow
+                                readonly property var p: modelData
                                 width: ListView.view.width
                                 height: 18
                                 color: index % 2 ? "#161616" : "transparent"
@@ -871,15 +1067,18 @@ Rectangle {
                                     anchors.fill: parent
                                     anchors.leftMargin: 6; anchors.rightMargin: 16
                                     spacing: 4
-                                    Text { Layout.preferredWidth: 44; horizontalAlignment: Text.AlignRight; text: modelData.pid; color: "#777"; font.pixelSize: 11; font.family: "Menlo" }
-                                    Text { Layout.fillWidth: true; text: modelData.name; color: "#ddd"; font.pixelSize: 11; font.family: "Menlo"; elide: Text.ElideRight }
-                                    Text {
-                                        Layout.preferredWidth: 52; horizontalAlignment: Text.AlignRight
-                                        text: modelData.cpu.toFixed(1)
-                                        color: modelData.cpu >= 50 ? "#e05555" : modelData.cpu >= 10 ? "#e0a030" : modelData.cpu > 0 ? "#5ac878" : "#666"
-                                        font.pixelSize: 11; font.family: "Menlo"
+                                    Repeater {
+                                        model: root.procColumns
+                                        Text {
+                                            Layout.preferredWidth: modelData.w
+                                            Layout.fillWidth: modelData.w < 0
+                                            horizontalAlignment: modelData.right ? Text.AlignRight : Text.AlignLeft
+                                            text: root.procCell(procRow.p, modelData.key)
+                                            color: root.procColor(procRow.p, modelData.key)
+                                            font.pixelSize: 11; font.family: "Menlo"
+                                            elide: Text.ElideRight
+                                        }
                                     }
-                                    Text { Layout.preferredWidth: 64; horizontalAlignment: Text.AlignRight; text: root.humanKB(modelData.rssKb); color: "#9ab"; font.pixelSize: 11; font.family: "Menlo" }
                                 }
                             }
                         }
@@ -894,33 +1093,6 @@ Rectangle {
                         }
                     }
 
-                    Rectangle {
-                        anchors.top: parent.top
-                        anchors.right: parent.right
-                        anchors.topMargin: 4
-                        anchors.rightMargin: 16
-                        width: procControls.implicitWidth + 12
-                        height: procControls.implicitHeight + 6
-                        radius: 5
-                        color: "#d92a2a2a"; border.color: "#555"
-
-                        RowLayout {
-                            id: procControls
-                            anchors.centerIn: parent
-                            spacing: 8
-                            Label {
-                                text: "PROCESSUS" + (root.procSeen ? " " + procList.count + " / " + root.processes.length : "")
-                                color: "#888"; font.pixelSize: 11; font.bold: true
-                            }
-                            CheckBox {
-                                text: "Noyau"
-                                Layout.preferredHeight: 24
-                                padding: 0
-                                checked: root.showKernelThreads
-                                onToggled: root.showKernelThreads = checked
-                            }
-                        }
-                    }
                 }
                 }
             }
@@ -980,99 +1152,159 @@ Rectangle {
                     Label { text: "DMESG"; color: "#888"; font.pixelSize: 11; font.bold: true }
                     CheckBox {
                         id: trackDmesg
+                        ToolTip.visible: hovered && ToolTip.text.length > 0
+                        ToolTip.delay: 600
+                        ToolTip.text: root.tip("trackDmesg")
                         text: "Suivre"
                         Layout.preferredHeight: 24
                         padding: 0
                         onCheckedChanged: if (checked) root.lastDmesgText = ""
                     }
-                    Button { text: "Tout";    Layout.preferredHeight: 24; onClicked: refreshDmesg(false) }
-                    Button { text: "Erreurs"; Layout.preferredHeight: 24; onClicked: refreshDmesg(true)  }
+                    Button {
+                        text: "Tout"
+                        Layout.preferredHeight: 24
+                        onClicked: refreshDmesg(false)
+                        ToolTip.visible: hovered && ToolTip.text.length > 0
+                        ToolTip.delay: 600
+                        ToolTip.text: root.tip("dmesgAll")
+                    }
+                    Button {
+                        text: "Erreurs"
+                        Layout.preferredHeight: 24
+                        onClicked: refreshDmesg(true)
+                        ToolTip.visible: hovered && ToolTip.text.length > 0
+                        ToolTip.delay: 600
+                        ToolTip.text: root.tip("dmesgErrors")
+                    }
                 }
             }
         }
 
-        // ==================== PLAYLISTS | MIDI, side by side ====================
-        StyledSplitView {
+        // ==================== PLAYLISTS + MIDI ====================
+        // One pane, scrolling left to right: a column per playlist (scrolling
+        // up/down when long), then the cross-machine MIDI listing. The list
+        // button floats over the top right corner, as dmesg's controls do.
+        Rectangle {
             SplitView.preferredHeight: 240
             SplitView.minimumHeight: 70
-            orientation: Qt.Horizontal
-            stateKey: "systemPlaylistsMidi"
-
-        // ==================== PLAYLISTS ====================
-        Rectangle {
-            SplitView.preferredWidth: 280
-            SplitView.minimumWidth: 140
             color: "#2a2a2a"; border.color: "#444"
 
-            ColumnLayout {
+            Flickable {
+                id: plFlick
                 anchors.fill: parent
                 anchors.margins: 6
-                spacing: 3
+                contentWidth: plRow.width
+                contentHeight: height
+                flickableDirection: Flickable.HorizontalFlick
+                boundsBehavior: Flickable.StopAtBounds
+                clip: true
+                ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AsNeeded }
 
-                RowLayout {
-                    Label { text: "PLAYLISTS DISTANTES"; color: "#888"; font.pixelSize: 11; font.bold: true }
-                    Item { Layout.fillWidth: true }
-                    Label { id: playlistStatus; text: ""; color: "#777"; font.pixelSize: 10 }
-                }
+                Row {
+                    id: plRow
+                    height: plFlick.height - 12
+                    spacing: 6
 
-                ScrollView {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    ListView {
-                        model: playlistsModel
+                    Repeater {
+                        model: root.playlists
                         delegate: Rectangle {
-                            width: ListView.view.width
-                            height: 22
-                            color: "transparent"
-                            Label {
-                                anchors.verticalCenter: parent.verticalCenter
-                                anchors.left: parent.left
-                                anchors.leftMargin: 8
-                                text: name
-                                color: "#ccc"
-                                font.family: "Menlo"
-                                font.pixelSize: 12
+                            width: 250; height: plRow.height
+                            color: "#1e1e1e"; border.color: modelData.active ? "#ff9f1a" : "#444"
+
+                            ColumnLayout {
+                                anchors.fill: parent
+                                anchors.margins: 4
+                                spacing: 2
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: (modelData.active ? "★ " : "") + modelData.name + "  (" + modelData.entries.length + ")"
+                                    color: modelData.active ? "#ff9f1a" : "#9ab"
+                                    font.pixelSize: 11; font.bold: true
+                                    elide: Text.ElideRight
+                                }
+                                ListView {
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    clip: true
+                                    model: modelData.entries
+                                    boundsBehavior: Flickable.StopAtBounds
+                                    ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                                    delegate: Item {
+                                        width: ListView.view.width; height: 20
+                                        ToolTip.visible: hov.hovered
+                                        ToolTip.delay: 600
+                                        ToolTip.text: modelData.file
+                                        HoverHandler { id: hov }
+                                        Row {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            spacing: 6
+                                            Label { width: 20; horizontalAlignment: Text.AlignRight; text: modelData.slot; color: "#777"; font.family: "Menlo"; font.pixelSize: 11 }
+                                            Label {
+                                                width: 150
+                                                text: modelData.pseudo !== "" ? modelData.pseudo : modelData.file
+                                                color: "#ccc"; font.family: "Menlo"; font.pixelSize: 11
+                                                elide: Text.ElideRight
+                                            }
+                                            Label { text: (modelData.loop ? "↻" : "") + (modelData.chain ? "⛓" : ""); color: "#5a9ae0"; font.pixelSize: 11 }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // MIDI files of every machine, compared with the Maître.
+                    Rectangle {
+                        width: 620; height: plRow.height
+                        color: "#1e1e1e"; border.color: "#444"
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: 4
+                            spacing: 2
+                            RowLayout {
+                                Label { text: "MIDI DISTANTS"; color: "#9ab"; font.pixelSize: 11; font.bold: true }
+                                Label { id: midiStatus; text: ""; color: "#777"; font.pixelSize: 10 }
+                            }
+                            ScrollView {
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                TextArea {
+                                    id: midiArea
+                                    readOnly: true
+                                    textFormat: TextEdit.RichText
+                                    color: "#ccc"
+                                    font.family: "Menlo"
+                                    font.pixelSize: 11
+                                    wrapMode: TextEdit.NoWrap
+                                    background: Rectangle { color: "#111" }
+                                }
                             }
                         }
                     }
                 }
             }
-        }
 
-        // ==================== MIDI DISTANTS ====================
-        Rectangle {
-            SplitView.fillWidth: true
-            SplitView.minimumWidth: 200
-            color: "#2a2a2a"; border.color: "#444"
-
-            ColumnLayout {
-                anchors.fill: parent
-                anchors.margins: 6
-                spacing: 3
-
+            Rectangle {
+                anchors.top: parent.top; anchors.right: parent.right
+                anchors.topMargin: 6; anchors.rightMargin: 14
+                width: plOverlay.implicitWidth + 12; height: plOverlay.implicitHeight + 8
+                color: "#cc2a2a2a"; radius: 4
                 RowLayout {
-                    Label { text: "MIDI DISTANTS"; color: "#888"; font.pixelSize: 11; font.bold: true }
-                    Item { Layout.fillWidth: true }
-                    Label { id: midiStatus; text: ""; color: "#777"; font.pixelSize: 10 }
-                }
-
-                ScrollView {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    TextArea {
-                        id: midiArea
-                        readOnly: true
-                        text: ""
-                        color: "#ccc"
-                        font.family: "Menlo"
-                        font.pixelSize: 11
-                        wrapMode: TextEdit.NoWrap
-                        background: Rectangle { color: "#111" }
+                    id: plOverlay
+                    anchors.centerIn: parent
+                    spacing: 8
+                    Label { id: playlistStatus; text: ""; color: "#777"; font.pixelSize: 10 }
+                    Button {
+                        text: "Lister playlists + MIDI"
+                        Layout.preferredHeight: 24
+                        onClicked: { listPlaylists(); listAllMidi() }
+                        ToolTip.visible: hovered && ToolTip.text.length > 0
+                        ToolTip.delay: 600
+                        ToolTip.text: root.tip("listPlaylists")
                     }
                 }
             }
         }
-        } // StyledSplitView (PLAYLISTS | MIDI)
         } // StyledSplitView (DMESG / PLAYLISTS + MIDI)
         } // StyledSplitView (SYSTEM INFO / rest)
     }
