@@ -218,6 +218,18 @@ async function getOrCreateCurrentPreset() {
     }
 })();
 
+// Le preset tel qu'il est dans `data`, les données qu'on va écrire. Les routes PATCH lisaient
+// le preset courant puis relisaient le fichier : elles modifiaient la première copie et
+// écrivaient la seconde, si bien que rien n'était enregistré (mesuré sur /outputs).
+function presetIn(data, preset) {
+    let target = data.presets.find(p => p.id === preset.id);
+    if (!target) {
+        data.presets.push(preset);
+        target = preset;
+    }
+    return target;
+}
+
 function getOrCreatePupitreEntry(preset, pupitreId) {
     if (!preset || !pupitreId) {
         return null;
@@ -659,7 +671,7 @@ function requestHandler(request, response) {
                 const preset = await getOrCreateCurrentPreset();
                 if (!preset) throw new Error('Impossible de créer un preset par défaut');
                 const data = await presetAPI.readPresets();
-                const p = getOrCreatePupitreEntry(preset, pupitreId);
+                const p = getOrCreatePupitreEntry(presetIn(data, preset), pupitreId);
                 p.assignedSirenes = Array.isArray(assignedSirenes) ? assignedSirenes : [];
                 await presetAPI.writePresets(data);
                 
@@ -694,7 +706,7 @@ function requestHandler(request, response) {
                 const preset = await getOrCreateCurrentPreset();
                 if (!preset) throw new Error('Impossible de créer un preset par défaut');
                 const data = await presetAPI.readPresets();
-                const p = getOrCreatePupitreEntry(preset, pupitreId);
+                const p = getOrCreatePupitreEntry(presetIn(data, preset), pupitreId);
                 if (!p.sirenes) p.sirenes = {};
                 const key = 'sirene' + (typeof sireneId === 'number' ? sireneId : parseInt(sireneId, 10));
                 if (!p.sirenes[key]) p.sirenes[key] = { ambitusRestricted: false, frettedMode: false };
@@ -743,7 +755,7 @@ function requestHandler(request, response) {
                 const preset = await getOrCreateCurrentPreset();
                 if (!preset) throw new Error('Impossible de créer un preset par défaut');
                 const data = await presetAPI.readPresets();
-                const p = getOrCreatePupitreEntry(preset, pupitreId);
+                const p = getOrCreatePupitreEntry(presetIn(data, preset), pupitreId);
                 const ch = changes || {};
                 ['vstEnabled','udpEnabled','rtpMidiEnabled'].forEach(k => { if (k in ch) p[k] = !!ch[k]; });
                 await presetAPI.writePresets(data);
@@ -796,7 +808,7 @@ function requestHandler(request, response) {
                 const preset = await getOrCreateCurrentPreset();
                 if (!preset) throw new Error('Impossible de créer un preset par défaut');
                 const data = await presetAPI.readPresets();
-                const p = getOrCreatePupitreEntry(preset, pupitreId);
+                const p = getOrCreatePupitreEntry(presetIn(data, preset), pupitreId);
                 if (!p.controllerMapping) p.controllerMapping = {};
                 if (!p.controllerMapping[controller]) p.controllerMapping[controller] = {};
                 if (cc !== undefined) p.controllerMapping[controller].cc = parseInt(cc, 10);
@@ -842,7 +854,7 @@ function requestHandler(request, response) {
                 const preset = await getOrCreateCurrentPreset();
                 if (!preset) throw new Error('Impossible de créer un preset par défaut');
                 const data = await presetAPI.readPresets();
-                const p = getOrCreatePupitreEntry(preset, pupitreId);
+                const p = getOrCreatePupitreEntry(presetIn(data, preset), pupitreId);
                 p.gameMode = gameMode !== undefined ? !!gameMode : false;
                 await presetAPI.writePresets(data);
                 
