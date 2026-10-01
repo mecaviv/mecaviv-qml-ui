@@ -131,6 +131,14 @@ Item {
         id: webSocketManager
         consoleController: consoleController
     }
+
+    // Un pupitre a modifié le preset courant : relire l'état qui en dépend
+    Connections {
+        target: webSocketManager
+        function onPresetUpdatedFromPupitre(pupitreId) {
+            loadAutonomyFromPreset()
+        }
+    }
     
     // Exposer les managers publiquement
     property var sireneManager: sireneManager

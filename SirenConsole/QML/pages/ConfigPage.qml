@@ -217,6 +217,14 @@ Rectangle {
         }
     }
 
+    // Un pupitre a modifié le preset courant : relire et réafficher le preset
+    Connections {
+        target: consoleController ? consoleController.webSocketManager : null
+        function onPresetUpdatedFromPupitre(pupitreId) {
+            loadCurrentPresetAndBind()
+        }
+    }
+
     // Rafraîchir les voyants à chaque changement de statut d'un pupitre
     Connections {
         target: consoleController
