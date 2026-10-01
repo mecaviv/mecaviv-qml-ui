@@ -279,21 +279,40 @@ Rectangle {
             "grep -E '^(MemTotal|MemFree|Buffers|Cached):' /proc/meminfo && df", "system-info")
     }
 
-    // The kernel log carries ANSI colors (m_seq_sim's progress lines:
-    // ESC[<codes>m): shown as rich text, the other escapes dropped. The text
-    // is escaped first, then each SGR sequence opens or closes a <span>.
+    // The kernel log carries ANSI colors (m_seq_sim's progress lines: ESC[<codes>m,
+    // with 256-color 38;5;n, 24-bit 38;2;r;g;b and bold/dim): shown as rich
+    // text, the other escapes dropped. The text is escaped first, then each SGR
+    // sequence opens or closes a <span>.
+    function xterm256(n) {
+        var base = ["#000000", "#cd3131", "#0dbc79", "#e5e510", "#2472c8", "#bc3fbc", "#11a8cd", "#e5e5e5",
+                    "#666666", "#f14c4c", "#23d18b", "#f5f543", "#3b8eea", "#d670d6", "#29b8db", "#ffffff"]
+        if (n < 16) return base[n]
+        if (n >= 232) { var g = 8 + (n - 232) * 10; return "rgb(" + g + "," + g + "," + g + ")" }
+        n -= 16
+        var lv = function(v) { return v === 0 ? 0 : 55 + v * 40 }
+        return "rgb(" + lv(Math.floor(n / 36)) + "," + lv(Math.floor(n / 6) % 6) + "," + lv(n % 6) + ")"
+    }
+
     function ansiToHtml(text) {
         var palette = { 30: "#777", 31: "#f55", 32: "#5f5", 33: "#fd5", 34: "#69f", 35: "#f7f", 36: "#5dd", 37: "#ccc" }
         var html = String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
         var open = false
         html = html.replace(/\x1b\[([0-9;]*)m/g, function(_, codes) {
             var style = ""
-            var list = codes === "" ? ["0"] : codes.split(";")
+            var list = codes === "" ? [0] : codes.split(";").map(function(x) { return parseInt(x) })
             for (var i = 0; i < list.length; i++) {
-                var c = parseInt(list[i])
+                var c = list[i]
                 if (c === 0) style = ""
                 else if (c === 1) style += "font-weight:bold;"
                 else if (c === 2) style += "color:#777;"
+                else if ((c === 38 || c === 48) && list[i + 1] === 5 && i + 2 < list.length) {
+                    if (c === 38) style += "color:" + xterm256(list[i + 2]) + ";"
+                    i += 2
+                }
+                else if ((c === 38 || c === 48) && list[i + 1] === 2 && i + 4 < list.length) {
+                    if (c === 38) style += "color:rgb(" + list[i + 2] + "," + list[i + 3] + "," + list[i + 4] + ");"
+                    i += 4
+                }
                 else if (palette[c] !== undefined) style += "color:" + palette[c] + ";"
                 else if (c >= 90 && c <= 97 && palette[c - 60] !== undefined) style += "color:" + palette[c - 60] + ";"
             }
