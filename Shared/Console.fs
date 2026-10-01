@@ -36,7 +36,10 @@ type PupitreConnection =
       PupitreName: string
       Connected: bool
       Url: string option
-      LastSeen: float option }
+      LastSeen: float option
+      /// Added by the server to PUPITRE_STATUS_UPDATE (and INITIAL_STATUS on identification).
+      IsSynced: bool option
+      LastSync: float option }
 
 /// The server's view of the pupitres (INITIAL_STATUS, PUPITRE_STATUS_UPDATE).
 type PupitresStatus =
@@ -50,7 +53,9 @@ let private pupitreConnectionDecoder: Decoder<PupitreConnection> =
           PupitreName = get.Optional.Field "pupitreName" Decode.string |> Option.defaultValue ""
           Connected = get.Optional.Field "connected" Decode.bool |> Option.defaultValue false
           Url = get.Optional.Field "url" Decode.string
-          LastSeen = get.Optional.Field "lastSeen" Decode.float })
+          LastSeen = get.Optional.Field "lastSeen" Decode.float
+          IsSynced = get.Optional.Field "isSynced" Decode.bool
+          LastSync = get.Optional.Field "lastSync" Decode.float })
 
 let private encodePupitreConnection (c: PupitreConnection) =
     Encode.object [
@@ -61,6 +66,11 @@ let private encodePupitreConnection (c: PupitreConnection) =
         | Some u -> "url", Encode.string u
         | None -> ()
         "lastSeen", (match c.LastSeen with Some t -> Encode.float t | None -> Encode.nil)
+        match c.IsSynced with
+        | Some s ->
+            "isSynced", Encode.bool s
+            "lastSync", (match c.LastSync with Some t -> Encode.float t | None -> Encode.nil)
+        | None -> ()
     ]
 
 let private pupitresStatusDecoder: Decoder<PupitresStatus> =
@@ -244,7 +254,9 @@ module ConsoleEvent =
               PupitreName = get.Optional.Field "pupitreName" Decode.string |> Option.defaultValue ""
               Connected = get.Optional.Field "connected" Decode.bool |> Option.defaultValue false
               Url = None
-              LastSeen = None },
+              LastSeen = None
+              IsSynced = None
+              LastSync = None },
             get.Optional.Field "timestamp" Decode.float |> Option.defaultValue 0.0)
 
     let decoder: Decoder<ConsoleEvent> =

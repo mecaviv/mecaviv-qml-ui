@@ -63,6 +63,10 @@ let events =
             """{"type":"INITIAL_STATUS","data":{"totalConnections":2,"connectedCount":1,"connections":[
                 {"pupitreId":"P1","pupitreName":"Pupitre 1","connected":true,"url":"ws://192.168.1.41:10002","lastSeen":1790885723000},
                 {"pupitreId":"P2","pupitreName":"Pupitre 2","connected":false,"url":"ws://localhost:10002","lastSeen":null}]}}"""
+        // server.js adds isSynced / lastSync to each connection every second
+        roundTrip "PUPITRE_STATUS_UPDATE with sync" ConsoleEvent.decoder ConsoleEvent.encode
+            """{"type":"PUPITRE_STATUS_UPDATE","timestamp":1790885723748,"data":{"totalConnections":1,"connectedCount":1,"connections":[
+                {"pupitreId":"P1","pupitreName":"Pupitre 1","connected":true,"url":"ws://192.168.1.41:10002","lastSeen":1790885723000,"isSynced":true,"lastSync":1790885720000}]}}"""
         roundTrip "PUPITRE_CONNECTED" ConsoleEvent.decoder ConsoleEvent.encode
             """{"type":"PUPITRE_CONNECTED","pupitreId":"P1","pupitreName":"Pupitre 1","connected":true,"timestamp":1790885723748}"""
         roundTrip "SYNC_STATUS_CHANGED" ConsoleEvent.decoder ConsoleEvent.encode
