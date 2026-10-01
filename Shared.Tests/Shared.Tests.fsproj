@@ -13,6 +13,7 @@
     <Compile Include="JsonTests.fs" />
     <Compile Include="ConsoleTests.fs" />
     <Compile Include="ConfigTests.fs" />
+    <Compile Include="PureDataFramesTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <Import Project="..\.paket\Paket.Restore.targets" />
