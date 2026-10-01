@@ -254,15 +254,75 @@ Découpage proposé, un module par canal plutôt qu'un catalogue global :
 
 Étapes suivantes, une par commit :
 1. ~~les champs de chaque message JSON et de chaque trame~~ (fait, § 2 et § 3) ;
-2. la forme des `config.js`, de `CONFIG_FULL` et des presets ;
+2. ~~la forme des `config.js`, de `CONFIG_FULL` et des presets~~ (fait, § 6 bis) ;
 3. lever les ⚠ et trancher les désaccords du flux PureData (un `print` dans `M645.pd` ou une
    capture WebSocket tranche) ;
 4. le projet `Shared` lui-même, avec des tests octet par octet contre des captures réelles.
+
+**Décisions (octobre 2026).** Interfaces web en **Fable + Feliz** (React) + Elmish. **SirenePupitre
+garde QML** : ses jeux demandent la souplesse graphique de QML. L'architecture est donc mixte :
+serveurs en F# partout, clients Fable/Feliz là où ça simplifie, QML pour le pupitre. Le contrat est
+la frontière entre les deux : `Shared` produira des exemples de messages et des tests pour que le
+QML du pupitre et le F# restent d'accord.
 
 **App pilote pour Fable : SirenConsole** — l'interface la plus simple (listes, formulaires,
 réglages, pas de dessin temps réel), et le plus gros serveur Node à porter : le pilote valide les
 deux moitiés de la chaîne. Elle utilise surtout les messages « Console ↔ serveur » et « Lecture
 MIDI » du § 2, les routes `/api/presets` du § 4, et le flux PureData côté console du § 3.
+
+## 6 bis. Configuration et presets (étape 3)
+
+### Trois sources de configuration
+
+| Fichier | Suivi par git | Lu par | Contenu |
+|---|---|---|---|
+| `config.json` (racine) | **non** (`.gitignore`, ligne 92), aucun modèle versionné | `config-loader.js` → `SirenConsole/webfiles/server.js`, `api-midi.js` (lève une erreur s'il manque) | la configuration d'un **pupitre** (voir ci-dessous), plus `servers` et `paths.midiRepository` |
+| `SirenConsole/config.js` et `SirenConsole/webfiles/config.js` | oui, **deux copies qui divergent** (P2 : `localhost` contre `192.168.1.42`) | QML (`ConfigManager` : `webfiles/config.js` en HTTP, puis `config.js`, aussi embarqué dans `data.qrc`), `puredata-proxy.js` | `pupitres[]`, `ui`, `presets` (anciens, en objet), `colors`, `servers.websocket`, `sirenAssignment` |
+| `SirenePupitre/config.js` | oui | QML du pupitre (`var configData = …`, pas un module Node) | `serverUrl`, `admin`, `controllersPanel`, `ui`, `midiFiles`, `sirenConfig`, `calibration`, `displayConfig`, `outputConfig`, `composeSiren` |
+
+### La configuration d'un pupitre (`CONFIG_FULL.config`)
+
+Même forme dans `config.json` et dans `SirenePupitre/config.js`, aux clés propres à chacun près :
+
+- `sirenConfig` : `mode`, `currentSirens[]`, `cb4techID`, `sirens[7]` avec `id`, `name`, `midiChannel`,
+  `ambitus {min, max}`, `restrictedMax`, `transposition`, `displayOctaveOffset`, `clef`, `outputs`,
+  `frettedMode {enabled}` ;
+- `displayConfig` : `camera` (reste de la 3D), `components.*` (`musicalStaff`, `rpm`, `sirenCircle`…,
+  chacun avec `visible`), `rpm.ledSettings`, `controllers.*` (🔧 en partie) ;
+- `composeSiren` : `enabled`, `controllers.<nom> {cc, value, range | values, description}` ;
+- `reverbConfig`, `outputConfig {sirenMode}`, `calibration.joystick` 🔧, `version`.
+
+Les chemins de `PARAM_UPDATE.path` (§ 2) sont des chemins dans cet objet
+(`["sirenConfig","sirens",2,"frettedMode","enabled"]`).
+
+### Presets de la console (`SirenConsole/webfiles/presets.json`)
+
+Stockés dans `webfiles/presets.json` (suivi par git, écrit par le serveur via un fichier `.tmp`
+puis renommé ; un `presets.json.corrupted-…` est aussi suivi). Racine : `{ presets: [...] }`.
+
+Un preset : `id`, `name`, `description`, `created`, `modified`, `version`, et **deux formats qui
+coexistent** :
+- ancien : `pupitres[]` à la racine du preset ;
+- actuel (écrit par `server.js`) : `config.pupitres[]`, avec en plus `sirenes`.
+
+Sur les deux presets stockés, l'un n'a que l'ancien format, l'autre les deux. Entrée de pupitre :
+`id`, `assignedSirenes[]`, `vstEnabled`, `udpEnabled`, `rtpMidiEnabled`,
+`controllerMapping.<contrôle> {cc, curve}` (`curve` : `linear`, `parabolic`, `hyperbolic`,
+`s curve`) 🔧 pour les contrôles joystick.
+
+Les anciens presets de `config.js` (« Concert Standard », « Mode Fretté »…) ont une troisième forme
+(`pupitreConfig`, `uiConfig`) ; aucun code ne semble plus les lire (à vérifier).
+
+### Pour `Shared.Config`
+
+- un type `PupitreConfig` (la forme ci-dessus), partagé par `CONFIG_FULL`, `config.json` et le
+  pupitre ;
+- un type `Preset` à **un seul** format, avec une lecture tolérante des deux anciens pour migrer
+  `presets.json` une fois ;
+- `config.json` versionné en modèle (`config.example.json`), la partie machine (adresses, chemins)
+  séparée de la partie musicale ;
+- une seule copie de la configuration de la console, servie par le serveur F# (fin des deux
+  `config.js`).
 
 ## 7. Mesure de référence : SirenConsole avant Fable
 
