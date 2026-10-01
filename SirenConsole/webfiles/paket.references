@@ -1,1 +1,4 @@
 FSharp.Core
+Giraffe
+Thoth.Json.Core
+Thoth.Json.Newtonsoft

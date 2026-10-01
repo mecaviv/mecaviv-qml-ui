@@ -49,7 +49,7 @@ let requestLog (ctx: HttpContext) (next: RequestDelegate) =
 let cors (ctx: HttpContext) (next: RequestDelegate) =
   ctx.Response.Headers.Append("Access-Control-Allow-Origin", "*")
   ctx.Response.Headers.Append("Access-Control-Allow-Headers", "*")
-  ctx.Response.Headers.Append("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+  ctx.Response.Headers.Append("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 
   if ctx.Request.Method = "OPTIONS" then
     ctx.Response.StatusCode <- 204
@@ -113,13 +113,17 @@ let envPort name fallback =
     | true, port -> port
     | _ -> fallback
 
-let useStaticSite (root: string) (defaultFiles: string list) (wasm: bool) (app: WebApplication) =
+/// Like useStaticSite, with the application's own routes (`api`) placed after the log and
+/// CORS, and before the 501 of the routes still served by Node: a route ported to F# takes
+/// over, the others keep answering "port-in-progress".
+let useStaticSiteWithApi (api: WebApplication -> unit) (root: string) (defaultFiles: string list) (wasm: bool) (app: WebApplication) =
   if wasm then
     app.Use wasmHeaders |> ignore
 
   app.Use requestLog |> ignore
   app.Use cors |> ignore
   app.Use hideBuildDirs |> ignore
+  api app
   app.Use unfinishedApis |> ignore
 
   let provider = new PhysicalFileProvider(root)
@@ -140,6 +144,9 @@ let useStaticSite (root: string) (defaultFiles: string list) (wasm: bool) (app: 
       ctx.Context.Response.Headers.Append("Cache-Control", "no-cache") |> ignore
 
   app.UseStaticFiles files |> ignore
+
+let useStaticSite (root: string) (defaultFiles: string list) (wasm: bool) (app: WebApplication) =
+  useStaticSiteWithApi ignore root defaultFiles wasm app
 
 let run (spec: HostSpec) (announce: unit -> unit) (setup: WebApplicationBuilder -> unit) (configure: WebApplication -> unit) =
   start spec.LogLevel
