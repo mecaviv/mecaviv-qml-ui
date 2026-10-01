@@ -64,6 +64,14 @@ type Links(pupitres: ConsolePupitre list, handlers: Handlers) =
     |> List.map (fun p -> p.Id, Link p)
     |> dict
 
+  /// The JSON messages received, newest last, at most 100 (eventBuffer): what
+  /// /api/puredata/events serves. The Node proxy never fills it (its JSON branch is dead).
+  let events = ConcurrentQueue<float * string * string * JsonValue>()
+  let maxEvents = 100
+
+  /// The last wheel state, for /api/volant-data.
+  let mutable lastVolant: JsonValue option = None
+
   let sendBytes (link: Link) (bytes: byte[]) =
     task {
       match link.Socket with
@@ -88,6 +96,11 @@ type Links(pupitres: ConsolePupitre list, handlers: Handlers) =
 
       match Decode.fromString (JsonValue.decoder ()) text with
       | Ok(JObject fields as json) ->
+        events.Enqueue(float (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()), id, link.Pupitre.Name, json)
+
+        while events.Count > maxEvents do
+          events.TryDequeue() |> ignore
+
         let field name =
           fields |> List.tryFind (fun (k, _) -> k = name) |> Option.map snd
 
@@ -124,6 +137,21 @@ type Links(pupitres: ConsolePupitre list, handlers: Handlers) =
       | VolantState(note, velocity, pitchBend) ->
         // puredata-proxy.js: S3's settings (an octave up, 8 outputs) for every pupitre
         let frequency = midiToFrequency note pitchBend 1
+        let now = float (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
+
+        lastVolant <-
+          Some(
+            JObject
+              [
+                "pupitreId", JString id
+                "note", JNumber(float note)
+                "velocity", JNumber(float velocity)
+                "pitchbend", JNumber(float pitchBend)
+                "frequency", JNumber frequency
+                "rpm", JNumber(frequencyToRpm frequency 8)
+                "timestamp", JNumber now
+              ]
+          )
 
         do!
           handlers.Ui(
@@ -263,6 +291,22 @@ type Links(pupitres: ConsolePupitre list, handlers: Handlers) =
 
       return n
     }
+
+  /// JSON messages received after `since` (ms), as /api/puredata/events serves them.
+  member _.Events(since: float) =
+    events.ToArray()
+    |> Array.filter (fun (t, _, _, _) -> t > since)
+    |> Array.map (fun (t, id, name, data) ->
+      JObject
+        [
+          "timestamp", JNumber t
+          "pupitreId", JString id
+          "pupitreName", JString name
+          "data", data
+        ])
+    |> Array.toList
+
+  member _.LastVolant = lastVolant
 
   member _.IsConnected(pupitreId: string) =
     match links.TryGetValue pupitreId with

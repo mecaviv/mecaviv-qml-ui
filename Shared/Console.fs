@@ -64,7 +64,7 @@ let private pupitreConnectionDecoder: Decoder<PupitreConnection> =
       LastSync = get.Optional.Field "lastSync" Decode.float
     })
 
-let private encodePupitreConnection (c: PupitreConnection) =
+let encodePupitreConnection (c: PupitreConnection) =
   Encode.object
     [
       "pupitreId", Encode.string c.PupitreId
@@ -104,7 +104,7 @@ let private pupitresStatusDecoder: Decoder<PupitresStatus> =
       Connections = connections
     })
 
-let private encodePupitresStatus (s: PupitresStatus) =
+let encodePupitresStatus (s: PupitresStatus) =
   Encode.object
     [
       "totalConnections", Encode.int s.TotalConnections

@@ -91,6 +91,22 @@ let main _ =
         member _.Send id message = links.Send(id, message) |> ignore
     }
 
+  let deps: Api.Deps =
+    {
+      Presets = presets
+      PresetLink = link
+      Links = links
+      Sync = sync
+      Hub = hub
+      Pupitres = pupitres
+      ConfigJs = configFile
+    }
+
+  /// The UI's WebSocket, then every HTTP route, before the static files (WebAssembly build).
+  let configureApp (app: Microsoft.AspNetCore.Builder.WebApplication) =
+    UiSocket.install hub sync status app
+    app.UseGiraffe(Api.webApp deps)
+
   run
     {
       LogLevel = "Debug"
@@ -104,10 +120,4 @@ let main _ =
       info "MIDI routes are still served by server.js"
       links.Start())
     (fun builder -> builder.Services.AddGiraffe() |> ignore)
-    (useStaticSiteWithApi
-      (fun app ->
-        UiSocket.install hub sync status app
-        app.UseGiraffe(choose [ ConsoleConfig.route pupitres; Presets.routes presets link ]))
-      root
-      [ "appSirenConsole.html" ]
-      true)
+    (useStaticSiteWithApi configureApp root [ "appSirenConsole.html" ] true)
