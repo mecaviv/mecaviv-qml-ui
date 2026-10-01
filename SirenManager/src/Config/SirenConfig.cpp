@@ -58,7 +58,7 @@ QString SirenConfig::nameForMachineType(MachineType machineType)
     }
 }
 
-// Raspberry Clic = Pi 5 deployment (m_seqPi5 firmware). Pi2 paths are obsolete.
+// Raspberry Clic = Pi 5 deployment (m_seq/pi5 firmware). Pi2 paths are obsolete.
 QString SirenConfig::midiPathForMachineType(MachineType machineType)
 {
     switch (machineType) {
