@@ -8,13 +8,6 @@
         "paket"
       ],
       "rollForward": false
-    },
-    "fable": {
-      "version": "5.18.0",
-      "commands": [
-        "fable"
-      ],
-      "rollForward": false
     }
   }
 }

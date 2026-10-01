@@ -14,30 +14,38 @@ open Mecaviv.Shared.Config
 
 /// The object after `const config =` in config.js, as strict JSON text.
 let objectOf (source: string) : Result<string, string> =
-    let marker = source.IndexOf "const config"
-    let start = if marker < 0 then -1 else source.IndexOf('{', marker)
-    if start < 0 then
-        Error "no `const config = {` in config.js"
-    else
-        try
-            use reader = new JsonTextReader(new StringReader(source.Substring start))
-            Ok((JToken.ReadFrom reader).ToString(Formatting.None))
-        with ex ->
-            Error $"config.js: {ex.Message}"
+  let marker = source.IndexOf "const config"
+  let start = if marker < 0 then -1 else source.IndexOf('{', marker)
+
+  if start < 0 then
+    Error "no `const config = {` in config.js"
+  else
+    try
+      use reader = new JsonTextReader(new StringReader(source.Substring start))
+      Ok((JToken.ReadFrom reader).ToString(Formatting.None))
+    with ex ->
+      Error $"config.js: {ex.Message}"
 
 let pupitresDecoder: Decoder<ConsolePupitre list> =
-    Decode.oneOf [ Decode.field "pupitres" (Decode.list ConsolePupitre.decoder); Decode.succeed [] ]
+  Decode.oneOf
+    [
+      Decode.field "pupitres" (Decode.list ConsolePupitre.decoder)
+      Decode.succeed []
+    ]
 
 /// The pupitres of config.js.
 let load (path: string) : Result<ConsolePupitre list, string> =
-    if not (File.Exists path) then
-        Error $"{path} not found"
-    else
-        objectOf (File.ReadAllText path)
-        |> Result.bind (Decode.fromString pupitresDecoder)
+  if not (File.Exists path) then
+    Error $"{path} not found"
+  else
+    objectOf (File.ReadAllText path)
+    |> Result.bind (Decode.fromString pupitresDecoder)
 
 /// GET /api/config → { "pupitres": [...] }
 let route (pupitres: ConsolePupitre list) : HttpHandler =
-    GET >=> route "/api/config"
-    >=> setHttpHeader "Content-Type" "application/json; charset=utf-8"
-    >=> setBodyFromString (Encode.toString 0 (Encode.object [ "pupitres", pupitres |> List.map ConsolePupitre.encode |> Encode.list ]))
+  GET
+  >=> route "/api/config"
+  >=> setHttpHeader "Content-Type" "application/json; charset=utf-8"
+  >=> setBodyFromString (
+    Encode.toString 0 (Encode.object [ "pupitres", pupitres |> List.map ConsolePupitre.encode |> Encode.list ])
+  )

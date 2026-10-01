@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- Types and codecs shared by the F# servers (.NET) and the web clients (Fable).
-       Pure F# only: no .NET-only API, so that Fable can compile every file here.
-       See docs/CONTRAT_PARTAGE.md. -->
+  <!-- Types and codecs of what circulates between the apps, their servers and PureData,
+       shared by the F# servers (SirenConsole first). The Node behaviour they reproduce is
+       described in SirenConsole/webfiles/NODE_CODEBASE.md. -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>Mecaviv.Shared</RootNamespace>
