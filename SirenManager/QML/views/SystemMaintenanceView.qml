@@ -47,6 +47,20 @@ Rectangle {
     property var cpuPrev: null                    // {total, idle} of the last /proc/stat
     property var cpuSamples: []                   // percent, oldest first
     property string cpuLoad: ""
+    property int cpuCores: 1
+    property var procPrev: ({})                   // pid -> jiffies (utime+stime) of the last tick
+    property var processes: []                    // [{pid, name, state, cpu, rssKb, threads}]
+    property string procSort: "cpu"               // cpu | mem | pid | name
+    property bool showKernelThreads: false
+    property bool procSeen: false                 // a tick has delivered a process list
+
+    // Readings of the summary tiles: set by "Rafraîchir" (system-info) and,
+    // for the memory, by every tracked tick as well.
+    property real memTotalKb: -1
+    property real memUsedKb: -1
+    property real diskTotalKb: -1
+    property real diskUsedKb: -1
+    property string diskPct: ""
 
     function requestDmesgTrack() {
         if (dmesgInFlight) return
@@ -57,9 +71,14 @@ Rectangle {
     function requestCpuTrack() {
         if (cpuInFlight) return
         cpuInFlight = true
-        // /proc/stat's first line and the load averages: two small reads, no
-        // top/ps, so the measurement barely loads the board it measures.
-        SshManager.executeCommand(currentMachine().id, "head -n 1 /proc/stat; cat /proc/loadavg", "cpu-track")
+        // /proc/stat's cpu lines, the load averages, the memory counters and
+        // one stat file per process: small /proc reads, no top/ps (BusyBox 1.00
+        // on the Artila has neither the options nor the patience), so the
+        // measurement barely loads the board it measures.
+        SshManager.executeCommand(currentMachine().id,
+            "grep '^cpu' /proc/stat; cat /proc/loadavg;"
+            + " grep -E '^(MemTotal|MemFree|Buffers|Cached):' /proc/meminfo;"
+            + " cat /proc/[0-9]*/stat 2>/dev/null", "cpu-track")
     }
 
     function onCpuSample(output) {
@@ -70,20 +89,87 @@ Rectangle {
         var idle = f[3] + (f[4] || 0)            // idle + iowait
         var l = output.match(/^(\d+\.\d+\s+\d+\.\d+\s+\d+\.\d+)/m)
         cpuLoad = l ? l[1] : ""
-        if (cpuPrev !== null && total > cpuPrev.total) {
-            var pct = 100 * (1 - (idle - cpuPrev.idle) / (total - cpuPrev.total))
+        // "cpu" alone on a uniprocessor kernel, "cpu" + "cpuN" lines on SMP.
+        var cpuLines = (output.match(/^cpu\d*\s/mg) || []).length
+        cpuCores = Math.max(1, cpuLines - 1)
+        var dTotal = cpuPrev !== null ? total - cpuPrev.total : 0
+        if (dTotal > 0) {
+            var pct = 100 * (1 - (idle - cpuPrev.idle) / dTotal)
             var next = cpuSamples.concat([Math.max(0, Math.min(100, pct))])
             cpuSamples = next.slice(-cpuHistory)
         }
         cpuPrev = { total: total, idle: idle }
         cpuCanvas.requestPaint()
+        onMemSample(output)
+        onProcessSample(output, dTotal)
+    }
+
+    // MemTotal/MemFree/Buffers/Cached (kB): "used" leaves out the buffers and
+    // the page cache, as a task manager does, since the kernel gives those back.
+    function onMemSample(output) {
+        function kb(name) {
+            var m = output.match(new RegExp("^" + name + ":\\s+(\\d+)", "m"))
+            return m ? parseInt(m[1]) : -1
+        }
+        var total = kb("MemTotal"), free = kb("MemFree")
+        if (total < 0 || free < 0) return
+        memTotalKb = total
+        memUsedKb = Math.max(0, total - free - Math.max(0, kb("Buffers")) - Math.max(0, kb("Cached")))
+    }
+
+    // One /proc/<pid>/stat per line: "pid (comm) state ppid ... utime stime ...".
+    // comm may hold spaces and parentheses, so it is cut at the last ") ".
+    // CPU is the process's share of the jiffies elapsed since the last tick, in
+    // units of one core (a busy thread on a 4 core box reads 100 %, not 25 %).
+    function onProcessSample(output, dTotal) {
+        var list = [], now = {}
+        output.split("\n").forEach(function(line) {
+            var m = line.match(/^(\d+) \((.*)\) (\S) (.*)$/)
+            if (!m) return
+            var r = m[4].split(" ")                      // r[0] = ppid (field 4)
+            var jiffies = parseInt(r[10]) + parseInt(r[11])    // utime + stime
+            var pid = parseInt(m[1])
+            now[pid] = jiffies
+            var prev = procPrev[pid]
+            var cpu = (prev !== undefined && dTotal > 0) ? 100 * cpuCores * (jiffies - prev) / dTotal : 0
+            list.push({
+                pid: pid, name: m[2], state: m[3],
+                cpu: Math.max(0, cpu),
+                rssKb: parseInt(r[20]) * 4,              // pages of 4 kB
+                threads: parseInt(r[16])
+            })
+        })
+        if (list.length === 0) return
+        procPrev = now
+        procSeen = true
+        processes = list
+    }
+
+    function sortedProcesses() {
+        var key = procSort
+        var list = processes.filter(function(p) { return showKernelThreads || p.rssKb > 0 })
+        list.sort(function(a, b) {
+            if (key === "name") return a.name < b.name ? -1 : a.name > b.name ? 1 : a.pid - b.pid
+            if (key === "pid") return a.pid - b.pid
+            if (key === "mem") return b.rssKb - a.rssKb || a.pid - b.pid
+            return b.cpu - a.cpu || b.rssKb - a.rssKb || a.pid - b.pid
+        })
+        return list
     }
 
     function resetCpuTrack() {
         cpuPrev = null
         cpuSamples = []
         cpuLoad = ""
+        procPrev = ({})
+        processes = []
+        procSeen = false
         cpuCanvas.requestPaint()
+    }
+
+    function resetSystemInfo() {
+        memTotalKb = -1; memUsedKb = -1
+        diskTotalKb = -1; diskUsedKb = -1; diskPct = ""
     }
 
     Connections {
@@ -135,8 +221,7 @@ Rectangle {
                 return
             }
             if (requestId === "system-info") {
-                ramLabel.text = success ? parseFreeOutput(output) : ("Erreur: " + error)
-                diskLabel.text = success ? parseDfOutput(output) : ""
+                if (success) { onMemSample(output); onDfSample(output) }
             } else if (requestId === "dmesg") {
                 dmesgArea.text = success ? ansiToHtml(output) : ansiToHtml("Erreur: " + error)
             } else if (requestId === "ls-playlists") {
@@ -159,35 +244,21 @@ Rectangle {
         }
     }
 
-    function parseFreeOutput(output) {
-        // Look for "Mem:" line. Format depends on `free` version (Mb on busybox).
-        var m = output.match(/Mem:\s+(\d+)\s+(\d+)\s+(\d+)/)
-        if (!m) return "RAM: (parsing failed)"
-        var total = parseInt(m[1])
-        var used = parseInt(m[2])
-        var free = parseInt(m[3])
-        return "RAM: " + used + " / " + total + " (libre: " + free + ")"
-    }
-    function parseDfOutput(output) {
+    function onDfSample(output) {
         // BusyBox `df` (no -h, since old versions reject it) reports in 1k
         // blocks: "Filesystem  1024-blocks  Used  Available  Use%  Mounted on"
         var lines = output.split("\n")
         for (var i = 0; i < lines.length; i++) {
-            if (lines[i].match(/\s\/\s*$/)) {
-                var fields = lines[i].split(/\s+/).filter(function(f) { return f.length > 0 })
-                if (fields.length >= 5) {
-                    var totalK = parseInt(fields[1])
-                    var usedK = parseInt(fields[2])
-                    var pct = fields[4]
-                    if (!isNaN(totalK)) {
-                        return "Disque /: " + humanKB(usedK) + " utilisé sur " + humanKB(totalK) + " (" + pct + ")"
-                    }
-                    // Already human-readable (modern df -h)
-                    return "Disque /: " + fields[2] + " utilisé sur " + fields[1] + " (" + pct + ")"
-                }
-            }
+            if (!lines[i].match(/\s\/\s*$/)) continue
+            var fields = lines[i].split(/\s+/).filter(function(f) { return f.length > 0 })
+            if (fields.length < 5) continue
+            var totalK = parseInt(fields[1]), usedK = parseInt(fields[2])
+            if (isNaN(totalK) || isNaN(usedK)) continue
+            diskTotalKb = totalK
+            diskUsedKb = usedK
+            diskPct = fields[4]
+            return
         }
-        return "Disque: (parsing failed)"
     }
 
     function humanKB(kb) {
@@ -198,16 +269,14 @@ Rectangle {
 
     function refreshSystemInfo() {
         busy = true
-        ramLabel.text = "..."
-        diskLabel.text = ""
         // `df` (no path arg, no -h) for compat with BusyBox 1.00 on Artila:
         // `df /` there prints only the header — the actual rootfs row only
-        // shows up when df is called without an argument. parseDfOutput
+        // shows up when df is called without an argument. onDfSample
         // filters to the line mounted on "/", which is unambiguous on every
         // sample we have (Artila, Pi5, modern Linux). humanKB() turns the
         // 1k-blocks into a readable size.
         SshManager.executeCommand(currentMachine().id,
-            "free | grep Mem && df", "system-info")
+            "grep -E '^(MemTotal|MemFree|Buffers|Cached):' /proc/meminfo && df", "system-info")
     }
 
     // The kernel log carries ANSI colors (m_seq_sim's progress lines:
@@ -481,8 +550,7 @@ Rectangle {
                     Layout.preferredWidth: 200
                     onCurrentIndexChanged: {
                         root.selectedMachineIdx = currentIndex
-                        ramLabel.text = "—"
-                        diskLabel.text = ""
+                        root.resetSystemInfo()
                         dmesgArea.text = ""
                         root.lastDmesgText = ""
                         diskDetailArea.text = ""
@@ -527,7 +595,7 @@ Rectangle {
         // ==================== SYSTEM INFO ====================
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 84 + 170
+            Layout.preferredHeight: 26 + 62 + 190
             color: "#2a2a2a"; border.color: "#444"; radius: 4
 
             ColumnLayout {
@@ -544,8 +612,39 @@ Rectangle {
                         onClicked: refreshSystemInfo()
                     }
                 }
-                TextEdit { id: ramLabel;  text: "—"; color: "white"; font.pixelSize: 14; font.family: "Menlo"; readOnly: true; selectByMouse: true; wrapMode: TextEdit.Wrap; Layout.fillWidth: true }
-                TextEdit { id: diskLabel; text: "";  color: "white"; font.pixelSize: 14; font.family: "Menlo"; readOnly: true; selectByMouse: true; wrapMode: TextEdit.Wrap; Layout.fillWidth: true }
+                // The summary as a task manager gives it: one tile per resource.
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 6
+
+                    GaugeTile {
+                        Layout.fillWidth: true
+                        title: "CPU"
+                        accent: "#5ac878"
+                        readonly property real last: root.cpuSamples.length > 0 ? root.cpuSamples[root.cpuSamples.length - 1] : -1
+                        fraction: last < 0 ? -1 : last / 100
+                        value: last < 0 ? "—" : last.toFixed(0) + " %"
+                        detail: !trackCpu.checked ? "cocher Suivre"
+                                : root.cpuLoad.length > 0 ? root.cpuCores + " c.  charge " + root.cpuLoad
+                                : root.cpuCores + " c."
+                    }
+                    GaugeTile {
+                        Layout.fillWidth: true
+                        title: "MÉMOIRE"
+                        accent: "#5a9ae0"
+                        fraction: root.memTotalKb > 0 && root.memUsedKb >= 0 ? root.memUsedKb / root.memTotalKb : -1
+                        value: fraction < 0 ? "—" : (100 * fraction).toFixed(0) + " %"
+                        detail: fraction < 0 ? "" : root.humanKB(root.memUsedKb) + " / " + root.humanKB(root.memTotalKb)
+                    }
+                    GaugeTile {
+                        Layout.fillWidth: true
+                        title: "DISQUE /"
+                        accent: "#c78fe0"
+                        fraction: root.diskTotalKb > 0 && root.diskUsedKb >= 0 ? root.diskUsedKb / root.diskTotalKb : -1
+                        value: fraction < 0 ? "—" : root.diskPct
+                        detail: fraction < 0 ? "" : root.humanKB(root.diskUsedKb) + " / " + root.humanKB(root.diskTotalKb)
+                    }
+                }
 
                 // CPU plot and disk breakdown side by side, both resizable.
                 StyledSplitView {
@@ -680,6 +779,117 @@ Rectangle {
                                 text: "Détail disque"
                                 Layout.preferredHeight: 24
                                 onClicked: root.requestDiskDetail()
+                            }
+                        }
+                    }
+                }
+
+                // Processes, sorted as a task manager sorts them: click a column
+                // title to change the key. Fed by the CPU tick, so it moves
+                // with "Suivre" and costs no ssh session of its own.
+                Rectangle {
+                    SplitView.preferredWidth: 400
+                    SplitView.minimumWidth: 220
+                    color: "#111"; border.color: "#444"
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 0
+                        spacing: 0
+
+                        Item { Layout.preferredHeight: 28 }       // under the floating label
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Layout.leftMargin: 6; Layout.rightMargin: 16
+                            spacing: 4
+                            Repeater {
+                                model: [
+                                    { key: "pid",  label: "PID",  w: 44,  right: true  },
+                                    { key: "name", label: "NOM",  w: -1,  right: false },
+                                    { key: "cpu",  label: "CPU %", w: 52, right: true  },
+                                    { key: "mem",  label: "MÉM",  w: 64,  right: true  }
+                                ]
+                                Text {
+                                    Layout.preferredWidth: modelData.w
+                                    Layout.fillWidth: modelData.w < 0
+                                    horizontalAlignment: modelData.right ? Text.AlignRight : Text.AlignLeft
+                                    text: modelData.label + (root.procSort === modelData.key ? (modelData.key === "pid" || modelData.key === "name" ? " ▲" : " ▼") : "")
+                                    color: root.procSort === modelData.key ? "#ff9f1a" : "#888"
+                                    font.pixelSize: 11; font.bold: true
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: root.procSort = modelData.key
+                                    }
+                                }
+                            }
+                        }
+                        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: "#333" }
+
+                        ListView {
+                            id: procList
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            clip: true
+                            model: root.procSeen ? root.sortedProcesses() : []
+                            ScrollBar.vertical: ScrollBar {}
+
+                            delegate: Rectangle {
+                                width: ListView.view.width
+                                height: 18
+                                color: index % 2 ? "#161616" : "transparent"
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 6; anchors.rightMargin: 16
+                                    spacing: 4
+                                    Text { Layout.preferredWidth: 44; horizontalAlignment: Text.AlignRight; text: modelData.pid; color: "#777"; font.pixelSize: 11; font.family: "Menlo" }
+                                    Text { Layout.fillWidth: true; text: modelData.name; color: "#ddd"; font.pixelSize: 11; font.family: "Menlo"; elide: Text.ElideRight }
+                                    Text {
+                                        Layout.preferredWidth: 52; horizontalAlignment: Text.AlignRight
+                                        text: modelData.cpu.toFixed(1)
+                                        color: modelData.cpu >= 50 ? "#e05555" : modelData.cpu >= 10 ? "#e0a030" : modelData.cpu > 0 ? "#5ac878" : "#666"
+                                        font.pixelSize: 11; font.family: "Menlo"
+                                    }
+                                    Text { Layout.preferredWidth: 64; horizontalAlignment: Text.AlignRight; text: root.humanKB(modelData.rssKb); color: "#9ab"; font.pixelSize: 11; font.family: "Menlo" }
+                                }
+                            }
+                        }
+
+                        Text {
+                            visible: !root.procSeen
+                            Layout.fillWidth: true
+                            Layout.margins: 8
+                            text: trackCpu.checked ? "Lecture des processus…" : "Cocher « Suivre » (CPU) pour lister les processus"
+                            color: "#777"; font.pixelSize: 11
+                            wrapMode: Text.Wrap
+                        }
+                    }
+
+                    Rectangle {
+                        anchors.top: parent.top
+                        anchors.right: parent.right
+                        anchors.topMargin: 4
+                        anchors.rightMargin: 16
+                        width: procControls.implicitWidth + 12
+                        height: procControls.implicitHeight + 6
+                        radius: 5
+                        color: "#d92a2a2a"; border.color: "#555"
+
+                        RowLayout {
+                            id: procControls
+                            anchors.centerIn: parent
+                            spacing: 8
+                            Label {
+                                text: "PROCESSUS" + (root.procSeen ? " " + procList.count + " / " + root.processes.length : "")
+                                color: "#888"; font.pixelSize: 11; font.bold: true
+                            }
+                            CheckBox {
+                                text: "Noyau"
+                                Layout.preferredHeight: 24
+                                padding: 0
+                                checked: root.showKernelThreads
+                                onToggled: root.showKernelThreads = checked
                             }
                         }
                     }

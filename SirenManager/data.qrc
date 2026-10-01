@@ -21,6 +21,7 @@
         <file>QML/components/MidiController.qml</file>
         <file>QML/components/MachineSelector.qml</file>
         <file>QML/components/StyledSplitView.qml</file>
+        <file>QML/components/GaugeTile.qml</file>
         
         <!-- Controllers -->
         <file>QML/controllers/UdpController.qml</file>
