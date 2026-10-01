@@ -263,3 +263,29 @@ Découpage proposé, un module par canal plutôt qu'un catalogue global :
 réglages, pas de dessin temps réel), et le plus gros serveur Node à porter : le pilote valide les
 deux moitiés de la chaîne. Elle utilise surtout les messages « Console ↔ serveur » et « Lecture
 MIDI » du § 2, les routes `/api/presets` du § 4, et le flux PureData côté console du § 3.
+
+## 7. Mesure de référence : SirenConsole avant Fable
+
+Pour que la comparaison avec la version F# / Fable démontre quelque chose, elle se fait **à
+fonctionnalités égales**, avec **la même règle de comptage**, et **sans le code généré** (ni celui
+d'Emscripten aujourd'hui, ni le JavaScript produit par Fable demain).
+
+Règle : lignes de code des fichiers suivis par git, sans les lignes vides ni les commentaires
+(`//`, `/* … */`, et `(* … *)` en F#). Relevé sur `main` (`f62aaa4`), `SirenConsole/` et
+`config-loader.js`.
+
+| Partie | Fichiers | Lignes de code |
+|---|---:|---:|
+| Interface : QML | 36 | 7 630 |
+| Interface : JS de QML (`WebSocketHelper.js`) | 1 | 32 |
+| Interface : C++ (`main.cpp`) | 1 | 22 |
+| Serveur : Node (`server.js`, `puredata-proxy.js`, `midi-sequencer.js`, `api-*.js`, `midi-analyzer.js`) | 7 | 3 050 |
+| Config partagée (`config.js`, `config-loader.js`) | 2 | 192 |
+| **Total écrit à la main** | **47** | **10 926** |
+| *Serveur : F# (hôte statique actuel, inclus dans la version cible)* | *1* | *15* |
+| *Tests (`test-*.js`)* | *4* | *155* |
+| *Généré (`appSirenConsole.js`, `qtloader.js`)* | *2* | *11 824* |
+
+Quatre langages écrits à la main aujourd'hui (QML, JavaScript, C++, et F# pour l'hôte) ; la cible
+n'en a qu'un. La version Fable sera mesurée avec la même règle, en séparant de même interface,
+serveur et `Shared` (le code de `Shared` compte une fois, bien qu'utilisé des deux côtés).
