@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import SirenManager
 import "../controllers/MachinePaths.js" as MachinePaths
+import "../components"
 
 Rectangle {
     id: root
@@ -31,6 +32,60 @@ Rectangle {
 
     function currentMachine() { return machines[selectedMachineIdx] }
 
+    // ---- Live tracking ("Suivre"), kept cheap on the boards: one ssh command
+    // per tick, never two in flight, nothing while the view is hidden or the
+    // box unchecked, and the dmesg text is only redrawn when it changed.
+    // Each tick opens a new ssh session: on the Artila (old key exchange) that
+    // costs about a second, so a `ControlMaster auto` + `ControlPersist 60` in
+    // ~/.ssh/config for the board makes the ticks nearly free.
+    readonly property int dmesgTrackMs: 3000
+    readonly property int cpuTrackMs: 2000
+    readonly property int cpuHistory: 90          // samples kept in the plot
+    property bool dmesgInFlight: false
+    property bool cpuInFlight: false
+    property string lastDmesgText: ""
+    property var cpuPrev: null                    // {total, idle} of the last /proc/stat
+    property var cpuSamples: []                   // percent, oldest first
+    property string cpuLoad: ""
+
+    function requestDmesgTrack() {
+        if (dmesgInFlight) return
+        dmesgInFlight = true
+        SshManager.executeCommand(currentMachine().id, "dmesg | tail -150", "dmesg-track")
+    }
+
+    function requestCpuTrack() {
+        if (cpuInFlight) return
+        cpuInFlight = true
+        // /proc/stat's first line and the load averages: two small reads, no
+        // top/ps, so the measurement barely loads the board it measures.
+        SshManager.executeCommand(currentMachine().id, "head -n 1 /proc/stat; cat /proc/loadavg", "cpu-track")
+    }
+
+    function onCpuSample(output) {
+        var m = output.match(/^cpu\s+(.*)$/m)
+        if (!m) return
+        var f = m[1].trim().split(/\s+/).map(Number)
+        var total = f.reduce(function(a, b) { return a + b }, 0)
+        var idle = f[3] + (f[4] || 0)            // idle + iowait
+        var l = output.match(/^(\d+\.\d+\s+\d+\.\d+\s+\d+\.\d+)/m)
+        cpuLoad = l ? l[1] : ""
+        if (cpuPrev !== null && total > cpuPrev.total) {
+            var pct = 100 * (1 - (idle - cpuPrev.idle) / (total - cpuPrev.total))
+            var next = cpuSamples.concat([Math.max(0, Math.min(100, pct))])
+            cpuSamples = next.slice(-cpuHistory)
+        }
+        cpuPrev = { total: total, idle: idle }
+        cpuCanvas.requestPaint()
+    }
+
+    function resetCpuTrack() {
+        cpuPrev = null
+        cpuSamples = []
+        cpuLoad = ""
+        cpuCanvas.requestPaint()
+    }
+
     Connections {
         target: SshManager
 
@@ -56,12 +111,34 @@ Rectangle {
                 rebootAllDialog.recordResult(mid, success, error)
                 return
             }
+            // Tracked polls run in the background: no spinner, no busy flag.
+            if (requestId === "dmesg-track") {
+                dmesgInFlight = false
+                if (success && trackDmesg.checked) {
+                    var html = ansiToHtml(output)
+                    if (html !== lastDmesgText) {
+                        lastDmesgText = html
+                        dmesgArea.text = html
+                        Qt.callLater(scrollDmesgToEnd)
+                    }
+                }
+                return
+            }
+            if (requestId === "cpu-track") {
+                cpuInFlight = false
+                if (success && trackCpu.checked) onCpuSample(output)
+                return
+            }
             busy = false
+            if (requestId === "disk-detail") {
+                diskDetailArea.text = success ? parseDiskDetail(output) : ("Erreur: " + error)
+                return
+            }
             if (requestId === "system-info") {
                 ramLabel.text = success ? parseFreeOutput(output) : ("Erreur: " + error)
                 diskLabel.text = success ? parseDfOutput(output) : ""
             } else if (requestId === "dmesg") {
-                dmesgArea.text = success ? output : ("Erreur: " + error)
+                dmesgArea.text = success ? ansiToHtml(output) : ansiToHtml("Erreur: " + error)
             } else if (requestId === "ls-playlists") {
                 if (success) {
                     var lines = output.split("\n").filter(function(l) { return l.trim().length > 0 })
@@ -131,6 +208,134 @@ Rectangle {
         // 1k-blocks into a readable size.
         SshManager.executeCommand(currentMachine().id,
             "free | grep Mem && df", "system-info")
+    }
+
+    // The kernel log carries ANSI colors (m_seq_sim's progress lines:
+    // ESC[<codes>m): shown as rich text, the other escapes dropped. The text
+    // is escaped first, then each SGR sequence opens or closes a <span>.
+    function ansiToHtml(text) {
+        var palette = { 30: "#777", 31: "#f55", 32: "#5f5", 33: "#fd5", 34: "#69f", 35: "#f7f", 36: "#5dd", 37: "#ccc" }
+        var html = String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        var open = false
+        html = html.replace(/\x1b\[([0-9;]*)m/g, function(_, codes) {
+            var style = ""
+            var list = codes === "" ? ["0"] : codes.split(";")
+            for (var i = 0; i < list.length; i++) {
+                var c = parseInt(list[i])
+                if (c === 0) style = ""
+                else if (c === 1) style += "font-weight:bold;"
+                else if (c === 2) style += "color:#777;"
+                else if (palette[c] !== undefined) style += "color:" + palette[c] + ";"
+                else if (c >= 90 && c <= 97 && palette[c - 60] !== undefined) style += "color:" + palette[c - 60] + ";"
+            }
+            var out = open ? "</span>" : ""
+            open = style !== ""
+            return out + (open ? "<span style=\"" + style + "\">" : "")
+        })
+        html = html.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "")
+        return "<pre style=\"margin:0\">" + html + (open ? "</span>" : "") + "</pre>"
+    }
+
+    // ---- Disk breakdown: where the space goes on the board, by kind. One ssh
+    // command of `du -sk` and `ls -l` (BusyBox-safe: no -h, no --max-depth),
+    // sorted and totalled here.
+    function requestDiskDetail() {
+        var id = currentMachine().id
+        var w = MachinePaths.basePathFor(id).replace(/\/$/, "")     // .../WorkSpaceSirenes
+        var home = w.replace(/\/WorkSpaceSirenes$/, "")
+        var cmd = "H='" + home + "'; W='" + w + "';"
+            + "echo '##df'; df;"
+            + "echo '##home'; du -sk \"$H\" 2>/dev/null;"
+            + "echo '##midi'; du -sk \"$W/Midi\" 2>/dev/null;"
+            + "echo '##playlists'; du -sk \"$W/liste_de_lecture\" 2>/dev/null;"
+            + "echo '##tmp'; du -sk /tmp 2>/dev/null;"
+            + "echo '##log'; du -sk /var/log 2>/dev/null;"
+            + "echo '##homefiles'; ls -l \"$H\" 2>/dev/null;"
+            + "echo '##midifiles'; ls -l \"$W/Midi\" 2>/dev/null;"
+            + "echo '##playlistfiles'; ls -l \"$W/liste_de_lecture\" 2>/dev/null"
+        busy = true
+        diskDetailArea.text = "..."
+        SshManager.executeCommand(id, cmd, "disk-detail")
+    }
+
+    function parseDiskDetail(output) {
+        var sec = {}, cur = ""
+        output.split("\n").forEach(function(l) {
+            var h = l.match(/^##(\w+)/)
+            if (h) { cur = h[1]; sec[cur] = []; return }
+            if (cur && l.trim().length > 0) sec[cur].push(l)
+        })
+        function du(name) {
+            var l = (sec[name] || [])[0]
+            var m = l ? l.match(/^(\d+)/) : null
+            return m ? parseInt(m[1]) : -1
+        }
+        // Regular files of an `ls -l`: {name, kb (bytes/1024), exec}.
+        function files(name) {
+            var out = []
+            ;(sec[name] || []).forEach(function(l) {
+                if (l.charAt(0) !== "-") return
+                var f = l.trim().split(/\s+/)
+                if (f.length < 9) return
+                out.push({ name: f.slice(8).join(" "), bytes: parseInt(f[4]), exec: f[0].indexOf("x") >= 0 })
+            })
+            return out
+        }
+        function bar(kb, total) {
+            var n = total > 0 ? Math.max(kb > 0 ? 1 : 0, Math.round(20 * kb / total)) : 0
+            return "█".repeat(n) + "·".repeat(20 - n)
+        }
+        function pct(kb, total) { return total > 0 ? (100 * kb / total).toFixed(0) + " %" : "" }
+        function sum(list) { return list.reduce(function(a, f) { return a + f.bytes }, 0) / 1024 }
+        function pad(t, n) { t = String(t); while (t.length < n) t += " "; return t }
+
+        var home = du("home"), midi = du("midi"), lists = du("playlists")
+        var homeFiles = files("homefiles")
+        // Modules and objects, and executables without an extension (scripts such
+        // as lance_taches): every file on the boards is rwx, so the mode is no clue.
+        var binaries = homeFiles.filter(function(f) { return /\.(ko|o|so|bin|debianbuilt)$/.test(f.name) || (f.exec && f.name.indexOf(".") < 0) })
+        var binKb = sum(binaries)
+        var other = home >= 0 ? Math.max(0, home - Math.max(midi, 0) - Math.max(lists, 0) - binKb) : -1
+
+        var t = ""
+        t += "Systèmes de fichiers\n"
+        ;(sec["df"] || []).slice(1).forEach(function(l) {
+            var f = l.trim().split(/\s+/)
+            if (f.length >= 6 && /^\d+$/.test(f[1]) && parseInt(f[1]) > 0)
+                t += "  " + pad(f[5], 16) + humanKB(parseInt(f[2])) + " / " + humanKB(parseInt(f[1])) + "  (" + f[4] + ")\n"
+        })
+        t += "\nRépertoire personnel (" + (home >= 0 ? humanKB(home) : "?") + ")\n"
+        function row(label, kb) {
+            if (kb < 0) return "  " + pad(label, 26) + "?\n"
+            return "  " + pad(label, 26) + bar(kb, home) + " " + pad(humanKB(kb), 10) + pct(kb, home) + "\n"
+        }
+        t += row("Fichiers MIDI", midi)
+        t += row("Playlists", lists)
+        t += row("Binaires / modules (.ko)", binKb)
+        t += row("Autres (config, logs…)", other)
+        var tmp = du("tmp"), log = du("log")
+        if (tmp >= 0 || log >= 0)
+            t += "\n  /tmp " + (tmp >= 0 ? humanKB(tmp) : "?") + "   /var/log " + (log >= 0 ? humanKB(log) : "?") + "  (mémoire vive)\n"
+
+        function top(title, list, n) {
+            if (list.length === 0) return ""
+            var sorted = list.slice().sort(function(a, b) { return b.bytes - a.bytes })
+            var out = "\n" + title + " (" + list.length + " fichiers, " + humanKB(sum(list)) + ")\n"
+            sorted.slice(0, n).forEach(function(f) {
+                out += "  " + pad(humanKB(f.bytes / 1024), 10) + f.name + "\n"
+            })
+            if (sorted.length > n) out += "  … " + (sorted.length - n) + " autres\n"
+            return out
+        }
+        t += top("Binaires et modules", binaries, 8)
+        t += top("Plus gros fichiers MIDI", files("midifiles"), 8)
+        t += top("Playlists", files("playlistfiles"), 5)
+        return t
+    }
+
+    function scrollDmesgToEnd() {
+        var bar = dmesgScroll.ScrollBar.vertical
+        if (bar) bar.position = 1.0 - bar.size
     }
 
     function refreshDmesg(filterErr) {
@@ -238,21 +443,36 @@ Rectangle {
         midiStatus.text = "Listing terminé"
     }
 
+    Timer {
+        interval: root.dmesgTrackMs
+        repeat: true
+        running: trackDmesg.checked && root.visible
+        triggeredOnStart: true
+        onTriggered: root.requestDmesgTrack()
+    }
+    Timer {
+        interval: root.cpuTrackMs
+        repeat: true
+        running: trackCpu.checked && root.visible
+        triggeredOnStart: true
+        onTriggered: root.requestCpuTrack()
+    }
+
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 12
-        spacing: 12
+        anchors.margins: 4
+        spacing: 4
 
         // ==================== MACHINE SELECTOR ====================
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 60
-            color: "#2a2a2a"; border.color: "#444"; radius: 6
+            Layout.preferredHeight: 40
+            color: "#2a2a2a"; border.color: "#444"; radius: 4
 
             RowLayout {
                 anchors.fill: parent
-                anchors.margins: 12
-                spacing: 16
+                anchors.margins: 4
+                spacing: 10
 
                 Label { text: "Machine:"; color: "#aaa"; font.pixelSize: 12 }
                 ComboBox {
@@ -264,6 +484,9 @@ Rectangle {
                         ramLabel.text = "—"
                         diskLabel.text = ""
                         dmesgArea.text = ""
+                        root.lastDmesgText = ""
+                        diskDetailArea.text = ""
+                        root.resetCpuTrack()
                         playlistsModel.clear()
                         playlistStatus.text = ""
                     }
@@ -278,6 +501,11 @@ Rectangle {
 
                 Item { Layout.fillWidth: true }
 
+                Button {
+                    text: "Lister playlists + MIDI"
+                    Layout.preferredHeight: 32
+                    onClicked: { listPlaylists(); listAllMidi() }
+                }
                 Button {
                     text: "Exporter clés SSH"
                     Layout.preferredHeight: 32
@@ -299,13 +527,13 @@ Rectangle {
         // ==================== SYSTEM INFO ====================
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 100
-            color: "#2a2a2a"; border.color: "#444"; radius: 6
+            Layout.preferredHeight: 84 + 170
+            color: "#2a2a2a"; border.color: "#444"; radius: 4
 
             ColumnLayout {
                 anchors.fill: parent
-                anchors.margins: 12
-                spacing: 6
+                anchors.margins: 6
+                spacing: 2
 
                 RowLayout {
                     Label { text: "ÉTAT SYSTÈME"; color: "#888"; font.pixelSize: 11; font.bold: true }
@@ -318,6 +546,145 @@ Rectangle {
                 }
                 TextEdit { id: ramLabel;  text: "—"; color: "white"; font.pixelSize: 14; font.family: "Menlo"; readOnly: true; selectByMouse: true; wrapMode: TextEdit.Wrap; Layout.fillWidth: true }
                 TextEdit { id: diskLabel; text: "";  color: "white"; font.pixelSize: 14; font.family: "Menlo"; readOnly: true; selectByMouse: true; wrapMode: TextEdit.Wrap; Layout.fillWidth: true }
+
+                // CPU plot and disk breakdown side by side, both resizable.
+                StyledSplitView {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    orientation: Qt.Horizontal
+
+                // CPU history, as Activity Monitor draws it: 0-100 % against
+                // time, newest on the right, a filled area under the line. The
+                // plot takes the whole pane; the reading and the box float over
+                // its top right corner.
+                Rectangle {
+                    SplitView.fillWidth: true
+                    SplitView.minimumWidth: 200
+                    color: "#111"; border.color: "#444"
+
+                    Canvas {
+                        id: cpuCanvas
+                        anchors.fill: parent
+                        onWidthChanged: requestPaint()
+                        onHeightChanged: requestPaint()
+                        onPaint: {
+                            var ctx = getContext("2d")
+                            var w = width, h = height
+                            ctx.reset()
+                            ctx.fillStyle = "#111"
+                            ctx.fillRect(0, 0, w, h)
+                            ctx.strokeStyle = "#333"
+                            ctx.lineWidth = 1
+                            ctx.beginPath()
+                            for (var g = 1; g < 4; g++) {          // 25, 50, 75 %
+                                var gy = Math.round(h * g / 4) + 0.5
+                                ctx.moveTo(0, gy); ctx.lineTo(w, gy)
+                            }
+                            ctx.stroke()
+                            var data = root.cpuSamples
+                            if (data.length < 2) return
+                            var step = w / (root.cpuHistory - 1)
+                            var x0 = w - (data.length - 1) * step
+                            function y(v) { return h - (v / 100) * (h - 2) - 1 }
+                            ctx.beginPath()
+                            ctx.moveTo(x0, h)
+                            for (var i = 0; i < data.length; i++) ctx.lineTo(x0 + i * step, y(data[i]))
+                            ctx.lineTo(w, h)
+                            ctx.closePath()
+                            ctx.fillStyle = "rgba(90, 200, 120, 0.30)"
+                            ctx.fill()
+                            ctx.beginPath()
+                            for (var j = 0; j < data.length; j++) {
+                                if (j === 0) ctx.moveTo(x0, y(data[0]))
+                                else ctx.lineTo(x0 + j * step, y(data[j]))
+                            }
+                            ctx.strokeStyle = "#5ac878"
+                            ctx.lineWidth = 1.5
+                            ctx.stroke()
+                        }
+                    }
+
+                    Rectangle {
+                        anchors.top: parent.top
+                        anchors.right: parent.right
+                        anchors.topMargin: 4
+                        anchors.rightMargin: 4
+                        width: cpuControls.implicitWidth + 12
+                        height: cpuControls.implicitHeight + 6
+                        radius: 5
+                        color: "#d92a2a2a"; border.color: "#555"
+
+                        RowLayout {
+                            id: cpuControls
+                            anchors.centerIn: parent
+                            spacing: 8
+                            Label {
+                                text: !trackCpu.checked ? "CPU"
+                                      : root.cpuSamples.length > 0
+                                        ? "CPU " + root.cpuSamples[root.cpuSamples.length - 1].toFixed(0) + " %"
+                                        : "CPU …"
+                                color: "white"; font.pixelSize: 12; font.family: "Menlo"; font.bold: true
+                            }
+                            Label {
+                                visible: trackCpu.checked && root.cpuLoad.length > 0
+                                text: "charge " + root.cpuLoad
+                                color: "#888"; font.pixelSize: 11; font.family: "Menlo"
+                            }
+                            CheckBox {
+                                id: trackCpu
+                                text: "Suivre"
+                                Layout.preferredHeight: 24
+                                padding: 0
+                                onCheckedChanged: root.resetCpuTrack()
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    SplitView.preferredWidth: 440
+                    SplitView.minimumWidth: 200
+                    color: "#111"; border.color: "#444"
+
+                    ScrollView {
+                        anchors.fill: parent
+                        TextArea {
+                            id: diskDetailArea
+                            readOnly: true
+                            color: "#ccc"
+                            font.family: "Menlo"
+                            font.pixelSize: 12
+                            wrapMode: TextEdit.NoWrap
+                            leftPadding: 6; topPadding: 4; rightPadding: 6; bottomPadding: 4
+                            placeholderText: "Détail disque: MIDI, playlists, binaires"
+                            background: null
+                        }
+                    }
+
+                    Rectangle {
+                        anchors.top: parent.top
+                        anchors.right: parent.right
+                        anchors.topMargin: 4
+                        anchors.rightMargin: 16
+                        width: diskControls.implicitWidth + 12
+                        height: diskControls.implicitHeight + 6
+                        radius: 5
+                        color: "#d92a2a2a"; border.color: "#555"
+
+                        RowLayout {
+                            id: diskControls
+                            anchors.centerIn: parent
+                            spacing: 8
+                            Label { text: "DISQUE"; color: "#888"; font.pixelSize: 11; font.bold: true }
+                            Button {
+                                text: "Détail disque"
+                                Layout.preferredHeight: 24
+                                onClicked: root.requestDiskDetail()
+                            }
+                        }
+                    }
+                }
+                }
             }
         }
 
@@ -326,62 +693,85 @@ Rectangle {
         // trois panneaux à contenu long. dmesg (lignes noyau longues, NoWrap)
         // prend la part par défaut ; les poignées permettent de l'agrandir
         // quand la fenêtre est trop courte pour tout afficher.
-        SplitView {
+        StyledSplitView {
             Layout.fillWidth: true
             Layout.fillHeight: true
             orientation: Qt.Vertical
 
         // ==================== DMESG ====================
+        // The console takes the whole pane; the label and controls float over
+        // its top right corner (clear of the scrollbar).
         Rectangle {
             SplitView.fillHeight: true
             SplitView.minimumHeight: 120
-            color: "#2a2a2a"; border.color: "#444"; radius: 6
+            color: "#111"; border.color: "#444"
 
-            ColumnLayout {
+            ScrollView {
+                id: dmesgScroll
                 anchors.fill: parent
-                anchors.margins: 12
-                spacing: 6
+                TextArea {
+                    id: dmesgArea
+                    readOnly: true
+                    textFormat: TextEdit.RichText
+                    text: ""
+                    color: "#ccc"
+                    font.family: "Menlo"
+                    font.pixelSize: 11
+                    wrapMode: TextEdit.NoWrap
+                    leftPadding: 6; topPadding: 4; rightPadding: 6; bottomPadding: 4
+                    background: null
+                }
+            }
+
+            Rectangle {
+                anchors.top: parent.top
+                anchors.right: parent.right
+                anchors.topMargin: 4
+                anchors.rightMargin: 16
+                width: dmesgControls.implicitWidth + 12
+                height: dmesgControls.implicitHeight + 6
+                radius: 5
+                color: "#d92a2a2a"; border.color: "#555"
 
                 RowLayout {
+                    id: dmesgControls
+                    anchors.centerIn: parent
+                    spacing: 6
                     Label { text: "DMESG"; color: "#888"; font.pixelSize: 11; font.bold: true }
-                    Item { Layout.fillWidth: true }
-                    Button { text: "Tout";    Layout.preferredHeight: 26; onClicked: refreshDmesg(false) }
-                    Button { text: "Erreurs"; Layout.preferredHeight: 26; onClicked: refreshDmesg(true)  }
-                }
-
-                ScrollView {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    TextArea {
-                        id: dmesgArea
-                        readOnly: true
-                        text: ""
-                        color: "#ccc"
-                        font.family: "Menlo"
-                        font.pixelSize: 11
-                        wrapMode: TextEdit.NoWrap
-                        background: Rectangle { color: "#111" }
+                    CheckBox {
+                        id: trackDmesg
+                        text: "Suivre"
+                        Layout.preferredHeight: 24
+                        padding: 0
+                        onCheckedChanged: if (checked) root.lastDmesgText = ""
                     }
+                    Button { text: "Tout";    Layout.preferredHeight: 24; onClicked: refreshDmesg(false) }
+                    Button { text: "Erreurs"; Layout.preferredHeight: 24; onClicked: refreshDmesg(true)  }
                 }
             }
         }
 
+        // ==================== PLAYLISTS | MIDI, side by side ====================
+        StyledSplitView {
+            SplitView.preferredHeight: 240
+            SplitView.minimumHeight: 70
+            orientation: Qt.Horizontal
+
         // ==================== PLAYLISTS ====================
         Rectangle {
-            SplitView.preferredHeight: 180
-            SplitView.minimumHeight: 70
-            color: "#2a2a2a"; border.color: "#444"; radius: 6
+            SplitView.preferredWidth: 280
+            SplitView.minimumWidth: 140
+            color: "#2a2a2a"; border.color: "#444"
 
             ColumnLayout {
                 anchors.fill: parent
-                anchors.margins: 12
-                spacing: 6
+                anchors.margins: 6
+                spacing: 3
 
                 RowLayout {
                     Label { text: "PLAYLISTS DISTANTES"; color: "#888"; font.pixelSize: 11; font.bold: true }
                     Item { Layout.fillWidth: true }
                     Label { id: playlistStatus; text: ""; color: "#777"; font.pixelSize: 10 }
-                    Button { text: "Lister"; Layout.preferredHeight: 26; onClicked: listPlaylists() }
                 }
 
                 ScrollView {
@@ -410,24 +800,19 @@ Rectangle {
 
         // ==================== MIDI DISTANTS ====================
         Rectangle {
-            SplitView.preferredHeight: 240
-            SplitView.minimumHeight: 70
-            color: "#2a2a2a"; border.color: "#444"; radius: 6
+            SplitView.fillWidth: true
+            SplitView.minimumWidth: 200
+            color: "#2a2a2a"; border.color: "#444"
 
             ColumnLayout {
                 anchors.fill: parent
-                anchors.margins: 12
-                spacing: 6
+                anchors.margins: 6
+                spacing: 3
 
                 RowLayout {
                     Label { text: "MIDI DISTANTS"; color: "#888"; font.pixelSize: 11; font.bold: true }
                     Item { Layout.fillWidth: true }
                     Label { id: midiStatus; text: ""; color: "#777"; font.pixelSize: 10 }
-                    Button {
-                        text: "Lister tout"
-                        Layout.preferredHeight: 26
-                        onClicked: listAllMidi()
-                    }
                 }
 
                 ScrollView {
@@ -446,7 +831,8 @@ Rectangle {
                 }
             }
         }
-        } // SplitView (DMESG / PLAYLISTS / MIDI)
+        } // StyledSplitView (PLAYLISTS | MIDI)
+        } // StyledSplitView (DMESG / PLAYLISTS + MIDI)
     }
 
     // ==================== EXPORT KEYS ARCHIVE ====================
