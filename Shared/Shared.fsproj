@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Types and codecs shared by the F# servers (.NET) and the web clients (Fable).
+       Pure F# only: no .NET-only API, so that Fable can compile every file here.
+       See docs/CONTRAT_PARTAGE.md. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Mecaviv.Shared</RootNamespace>
+    <AssemblyName>mecaviv-shared</AssemblyName>
+    <NoWarn>$(NoWarn);NU1510;</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Json.fs" />
+  </ItemGroup>
+  <Import Project="..\.paket\Paket.Restore.targets" />
+</Project>
