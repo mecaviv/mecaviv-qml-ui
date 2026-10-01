@@ -36,7 +36,8 @@ type PupitreConnection =
       PupitreName: string
       Connected: bool
       Url: string option
-      LastSeen: float option
+      /// When the server last heard from it: an ISO date (a JS Date serialized), or null.
+      LastSeen: string option
       /// Added by the server to PUPITRE_STATUS_UPDATE (and INITIAL_STATUS on identification).
       IsSynced: bool option
       LastSync: float option }
@@ -53,7 +54,7 @@ let private pupitreConnectionDecoder: Decoder<PupitreConnection> =
           PupitreName = get.Optional.Field "pupitreName" Decode.string |> Option.defaultValue ""
           Connected = get.Optional.Field "connected" Decode.bool |> Option.defaultValue false
           Url = get.Optional.Field "url" Decode.string
-          LastSeen = get.Optional.Field "lastSeen" Decode.float
+          LastSeen = get.Optional.Field "lastSeen" Decode.string
           IsSynced = get.Optional.Field "isSynced" Decode.bool
           LastSync = get.Optional.Field "lastSync" Decode.float })
 
@@ -65,7 +66,7 @@ let private encodePupitreConnection (c: PupitreConnection) =
         match c.Url with
         | Some u -> "url", Encode.string u
         | None -> ()
-        "lastSeen", (match c.LastSeen with Some t -> Encode.float t | None -> Encode.nil)
+        "lastSeen", (match c.LastSeen with Some t -> Encode.string t | None -> Encode.nil)
         match c.IsSynced with
         | Some s ->
             "isSynced", Encode.bool s

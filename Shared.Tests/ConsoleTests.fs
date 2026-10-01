@@ -61,12 +61,16 @@ let events =
         // server.js + puredata-proxy.js getStatus
         roundTrip "INITIAL_STATUS" ConsoleEvent.decoder ConsoleEvent.encode
             """{"type":"INITIAL_STATUS","data":{"totalConnections":2,"connectedCount":1,"connections":[
-                {"pupitreId":"P1","pupitreName":"Pupitre 1","connected":true,"url":"ws://192.168.1.41:10002","lastSeen":1790885723000},
+                {"pupitreId":"P1","pupitreName":"Pupitre 1","connected":true,"url":"ws://192.168.1.41:10002","lastSeen":"2026-10-01T21:55:34.202Z"},
                 {"pupitreId":"P2","pupitreName":"Pupitre 2","connected":false,"url":"ws://localhost:10002","lastSeen":null}]}}"""
         // server.js adds isSynced / lastSync to each connection every second
         roundTrip "PUPITRE_STATUS_UPDATE with sync" ConsoleEvent.decoder ConsoleEvent.encode
             """{"type":"PUPITRE_STATUS_UPDATE","timestamp":1790885723748,"data":{"totalConnections":1,"connectedCount":1,"connections":[
-                {"pupitreId":"P1","pupitreName":"Pupitre 1","connected":true,"url":"ws://192.168.1.41:10002","lastSeen":1790885723000,"isSynced":true,"lastSync":1790885720000}]}}"""
+                {"pupitreId":"P1","pupitreName":"Pupitre 1","connected":true,"url":"ws://192.168.1.41:10002","lastSeen":"2026-10-01T21:55:34.202Z","isSynced":true,"lastSync":1790885720000}]}}"""
+        // measured: server.js with a real pupitre (M645.pd) connected as P2
+        roundTrip "INITIAL_STATUS, a real connected pupitre" ConsoleEvent.decoder ConsoleEvent.encode
+            """{"type":"INITIAL_STATUS","data":{"totalConnections":1,"connectedCount":1,"connections":[
+                {"pupitreId":"P2","pupitreName":"Pupitre 2","connected":true,"url":"ws://localhost:10002","lastSeen":"2026-10-01T21:55:34.202Z","isSynced":true,"lastSync":1790891737315}]}}"""
         roundTrip "PUPITRE_CONNECTED" ConsoleEvent.decoder ConsoleEvent.encode
             """{"type":"PUPITRE_CONNECTED","pupitreId":"P1","pupitreName":"Pupitre 1","connected":true,"timestamp":1790885723748}"""
         roundTrip "SYNC_STATUS_CHANGED" ConsoleEvent.decoder ConsoleEvent.encode
