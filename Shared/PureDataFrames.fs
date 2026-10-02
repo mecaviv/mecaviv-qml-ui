@@ -1,5 +1,5 @@
 /// The binary frames a pupitre's PureData (M645.pd, WebSocket 10002) sends, as the console
-/// reads them (docs/CONTRAT_PARTAGE.md, § 3, console column). Little-endian unless noted.
+/// reads them (SirenConsole/webfiles/NODE_CODEBASE.md, the frame table). Little-endian unless noted.
 ///
 /// A frame is recognised by its first byte **and its length**. Known fixed-size frames are
 /// tried before the 8-byte header of a configuration chunk: puredata-proxy.js does the

@@ -1,4 +1,4 @@
-/// SirenConsole's messages (docs/CONTRAT_PARTAGE.md, § 2): between the console's UI and its
+/// SirenConsole's messages (SirenConsole/webfiles/NODE_CODEBASE.md, WebSocket /ws): between the console's UI and its
 /// server (WebSocket /ws on 8001), and between the server and each pupitre's PureData
 /// (WebSocket 10002, JSON part). Encoders write the field names the current code uses, so an
 /// F# server stays compatible with the QML UI; decoders accept the optional fields as optional.

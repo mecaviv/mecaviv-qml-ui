@@ -1,4 +1,4 @@
-/// Configuration and presets (docs/CONTRAT_PARTAGE.md, § 6 bis).
+/// Configuration and presets (SirenConsole/webfiles/NODE_CODEBASE.md, HTTP contract).
 module Mecaviv.Shared.Config
 
 open Thoth.Json.Core
