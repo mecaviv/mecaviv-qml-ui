@@ -91,6 +91,8 @@ Item {
     signal connectionClosed(string url)
     signal messageReceived(string url, string message)
     signal errorOccurred(string url, string error)
+    // Un pupitre a modifié un réglage du preset courant : l'interface doit le relire
+    signal presetUpdatedFromPupitre(string pupitreId)
     
     onConnectionOpened: function(url) {
         // Envoyer immédiatement l'identification
@@ -307,6 +309,9 @@ Item {
                             data.velocity || 0
                         )
                     }
+                    break
+                case "PRESET_UPDATED_FROM_PUPITRE":
+                    presetUpdatedFromPupitre(data.pupitreId || "")
                     break
                 default:
                     // console.log("📨 Autre message reçu:", data.type)

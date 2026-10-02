@@ -21,22 +21,24 @@ function createDefaultPresets() {
                 created: new Date().toISOString(),
                 modified: new Date().toISOString(),
                 version: "1.0",
-                pupitres: [
-                    {
-                        id: "P1",
-                        assignedSirenes: [1],
-                        vstEnabled: true,
-                        udpEnabled: true,
-                        rtpMidiEnabled: true,
-                        controllerMapping: {
-                            joystickX: { cc: 1, curve: "linear" },
-                            joystickY: { cc: 2, curve: "parabolic" },
-                            fader: { cc: 3, curve: "hyperbolic" },
-                            selector: { cc: 4, curve: "s curve" },
-                            pedalId: { cc: 5, curve: "linear" }
+                config: {
+                    pupitres: [
+                        {
+                            id: "P1",
+                            assignedSirenes: [1],
+                            vstEnabled: true,
+                            udpEnabled: true,
+                            rtpMidiEnabled: true,
+                            controllerMapping: {
+                                joystickX: { cc: 1, curve: "linear" },
+                                joystickY: { cc: 2, curve: "parabolic" },
+                                fader: { cc: 3, curve: "hyperbolic" },
+                                selector: { cc: 4, curve: "s curve" },
+                                pedalId: { cc: 5, curve: "linear" }
+                            }
                         }
-                    }
-                ]
+                    ]
+                }
             },
             {
                 id: "preset_002",
@@ -45,25 +47,42 @@ function createDefaultPresets() {
                 created: new Date().toISOString(),
                 modified: new Date().toISOString(),
                 version: "1.0",
-                pupitres: [
-                    {
-                        id: "P1",
-                        assignedSirenes: [1],
-                        vstEnabled: false,
-                        udpEnabled: true,
-                        rtpMidiEnabled: false,
-                        controllerMapping: {
-                            joystickX: { cc: 10, curve: "parabolic" },
-                            joystickY: { cc: 11, curve: "hyperbolic" },
-                            fader: { cc: 12, curve: "linear" },
-                            selector: { cc: 13, curve: "s curve" },
-                            pedalId: { cc: 14, curve: "linear" }
+                config: {
+                    pupitres: [
+                        {
+                            id: "P1",
+                            assignedSirenes: [1],
+                            vstEnabled: false,
+                            udpEnabled: true,
+                            rtpMidiEnabled: false,
+                            controllerMapping: {
+                                joystickX: { cc: 10, curve: "parabolic" },
+                                joystickY: { cc: 11, curve: "hyperbolic" },
+                                fader: { cc: 12, curve: "linear" },
+                                selector: { cc: 13, curve: "s curve" },
+                                pedalId: { cc: 14, curve: "linear" }
+                            }
                         }
-                    }
-                ]
+                    ]
+                }
             }
         ]
     };
+}
+
+// Un seul format de preset : les pupitres dans config.pupitres (ce que server.js écrit
+// et ce que lit le QML). L'ancien format les mettait à la racine du preset : on les y
+// déplace s'il n'y a pas encore de config.pupitres, sinon on garde config.pupitres,
+// plus récent (la racine n'était alors qu'un reste des presets par défaut).
+function normalizePreset(preset) {
+    if (!preset || typeof preset !== 'object') return preset;
+    const legacy = preset.pupitres;
+    const { pupitres, ...rest } = preset;
+    const config = (rest.config && typeof rest.config === 'object') ? { ...rest.config } : {};
+    if (!Array.isArray(config.pupitres)) {
+        config.pupitres = Array.isArray(legacy) ? legacy : [];
+    }
+    return { ...rest, config };
 }
 
 // Initialiser le fichier presets s'il n'existe pas
@@ -117,6 +136,7 @@ async function readPresets() {
             throw new Error('Structure invalide: presets n\'est pas un tableau');
         }
         
+        parsed.presets = parsed.presets.map(normalizePreset);
         return parsed;
     } catch (error) {
         console.error("❌ Erreur lecture presets:", error);
@@ -194,7 +214,7 @@ app.post('/api/presets', async (req, res) => {
     try {
         console.log("📤 POST /api/presets");
         
-        const presetData = req.body;
+        const presetData = normalizePreset(req.body);
         
         // Validation basique
         if (!presetData.name) {
@@ -230,7 +250,7 @@ app.put('/api/presets/:id', async (req, res) => {
         const presetId = req.params.id;
         console.log("📝 PUT /api/presets/" + presetId);
         
-        const presetData = req.body;
+        const presetData = normalizePreset(req.body);
         
         const data = await readPresets();
         const presetIndex = data.presets.findIndex(p => p.id === presetId);
@@ -325,5 +345,6 @@ module.exports = {
     app,
     readPresets,
     writePresets,
-    createDefaultPresets
+    createDefaultPresets,
+    normalizePreset
 };

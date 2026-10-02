@@ -29,10 +29,9 @@ franz run console-server                # F# server, https://localhost:8001 (fra
 
 ```
 SirenConsole/
-├── config.js              # Configuration réseau uniquement
+├── config.js              # Configuration de la console (pupitres, adresses) : seule copie
 ├── webfiles/
-│   ├── *.fs               # Serveur F# (README.md) ; server.js : l'ancien serveur Node
-│   └── config.js          # Config web
+│   └── *.fs               # Serveur F# (README.md) : lit ../config.js et le sert sous /config.js ; server.js : l'ancien serveur Node
 ├── QML/                    # Interface Qt
 └── scripts/
     └── test-connections.sh # Test réseau
