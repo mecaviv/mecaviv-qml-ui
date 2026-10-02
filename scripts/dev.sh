@@ -14,9 +14,9 @@ if [ $# -eq 0 ]; then
     echo "Usage: $0 <project>"
     echo "Projects disponibles:"
     echo "  - sirenepupitre    : Port 8000"
-    echo "  - sirenconsole     : Port 8001"
     echo "  - pedalier         : Port 8010"
     echo "  - router           : Port 8002"
+    echo "SirenConsole : franz build qml-ui -p wasm -t console, puis franz run console-server"
     exit 1
 fi
 
@@ -78,15 +78,6 @@ case $PROJECT in
         start_node_server "sirenepupitre" "$ROOT_DIR/SirenePupitre/webfiles" $PORT
         ;;
     
-    sirenconsole)
-        PORT=8001
-        kill_server $PORT
-        
-        echo "🔨 Build de SirenConsole..."
-        "$SCRIPT_DIR/build-project.sh" sirenconsole
-        
-        start_node_server "sirenconsole" "$ROOT_DIR/SirenConsole/webfiles" $PORT
-        ;;
     
     pedalier)
         PORT=8010
@@ -125,7 +116,7 @@ case $PROJECT in
     
     *)
         echo "❌ Projet inconnu: $PROJECT"
-        echo "Projects disponibles: sirenepupitre, sirenconsole, pedalier, router"
+        echo "Projects disponibles: sirenepupitre, pedalier, router (SirenConsole : franz run console-server)"
         exit 1
         ;;
 esac

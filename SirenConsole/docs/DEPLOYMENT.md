@@ -3,8 +3,9 @@
 ## 🚀 Démarrage Rapide
 
 ```bash
-# Build + Serveur + Chrome
-./scripts/run.sh
+# Build + serveur, sur le Mac de la console
+franz build qml-ui -p wasm -t console   # WebAssembly build, copied into SirenConsole/webfiles
+franz run console-server                # F# server, https://localhost:8001 (franz stop console-server)
 ```
 
 ## 🔧 Configuration
@@ -30,11 +31,10 @@
 SirenConsole/
 ├── config.js              # Configuration réseau uniquement
 ├── webfiles/
-│   ├── server.js          # Serveur Node.js
+│   ├── *.fs               # Serveur F# (README.md) ; server.js : l'ancien serveur Node
 │   └── config.js          # Config web
 ├── QML/                    # Interface Qt
 └── scripts/
-    ├── run.sh             # Démarrage complet
     └── test-connections.sh # Test réseau
 ```
 

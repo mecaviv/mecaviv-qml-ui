@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Types and codecs of what circulates between the apps, their servers and PureData,
+       shared by the F# servers (SirenConsole first). The Node behaviour they reproduce is
+       described in SirenConsole/webfiles/NODE_CODEBASE.md. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Mecaviv.Shared</RootNamespace>
+    <AssemblyName>mecaviv-shared</AssemblyName>
+    <NoWarn>$(NoWarn);NU1510;</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Json.fs" />
+    <Compile Include="Values.fs" />
+    <Compile Include="Console.fs" />
+    <Compile Include="Config.fs" />
+    <Compile Include="PureDataFrames.fs" />
+    <Compile Include="PresetSync.fs" />
+    <Compile Include="MidiScore.fs" />
+  </ItemGroup>
+  <Import Project="..\.paket\Paket.Restore.targets" />
+</Project>

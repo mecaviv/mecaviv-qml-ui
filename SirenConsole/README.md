@@ -49,7 +49,8 @@ const config = {
 
 ```bash
 # Démarrer SirenConsole
-./scripts/run.sh
+franz build qml-ui -p wasm -t console   # WebAssembly build, copied into SirenConsole/webfiles
+franz run console-server                # F# server, https://localhost:8001 (franz stop console-server)
 ```
 
 ## 📡 Communication

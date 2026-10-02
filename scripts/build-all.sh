@@ -68,7 +68,7 @@ echo "================================================"
 echo ""
 echo "Pour lancer un projet en mode développement :"
 echo "  ./scripts/dev.sh sirenepupitre"
-echo "  ./scripts/dev.sh sirenconsole"
+echo "  franz run console-server        (SirenConsole)"
 echo "  ./scripts/dev.sh pedalier"
 echo "  ./scripts/dev.sh router"
 

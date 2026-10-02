@@ -235,8 +235,9 @@ cmake --build build --parallel
 # SirenePupitre
 ./scripts/dev.sh sirenepupitre
 
-# SirenConsole
-./scripts/dev.sh sirenconsole
+# SirenConsole (serveur F#, par franz)
+franz build qml-ui -p wasm -t console   # WebAssembly build, copied into SirenConsole/webfiles
+franz run console-server                # F# server, https://localhost:8001 (franz stop console-server)
 
 # pedalierSirenium
 ./scripts/dev.sh pedalier
