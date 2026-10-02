@@ -15,4 +15,5 @@ let main argv =
         ConfigTests.tests
         PureDataFramesTests.tests
         PresetSyncTests.tests
+        MidiScoreTests.tests
       ])

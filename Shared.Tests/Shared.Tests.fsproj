@@ -16,6 +16,7 @@
     <Compile Include="ConfigTests.fs" />
     <Compile Include="PureDataFramesTests.fs" />
     <Compile Include="PresetSyncTests.fs" />
+    <Compile Include="MidiScoreTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <Import Project="..\.paket\Paket.Restore.targets" />
