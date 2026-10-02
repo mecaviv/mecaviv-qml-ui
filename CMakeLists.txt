@@ -187,6 +187,30 @@ find_package(Qt6 REQUIRED COMPONENTS
 )
 
 # ============================================================================
+# WebAssembly: the page next to its server (COPY_TO_WEBFILES)
+# ============================================================================
+# Each server (the F# ones, or server.js) serves its app's webfiles/ folder.
+# After a WebAssembly build, the page, its JavaScript, the module and Qt's
+# loader are copied there (the build scripts used to do it by hand). Each app
+# calls this after creating its target: a post-build step belongs to the
+# directory that creates the target.
+
+function(copy_to_webfiles target webfiles)
+    if(BUILD_FOR_WASM AND COPY_TO_WEBFILES)
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE_DIR:${target}>/${target}.html
+                $<TARGET_FILE_DIR:${target}>/${target}.js
+                $<TARGET_FILE_DIR:${target}>/${target}.wasm
+                $<TARGET_FILE_DIR:${target}>/qtloader.js
+                ${webfiles}/
+            COMMENT "${target}: copying the WebAssembly build into ${webfiles}"
+            VERBATIM
+        )
+    endif()
+endfunction()
+
+# ============================================================================
 # Sous-projets Qt/QML
 # ============================================================================
 
