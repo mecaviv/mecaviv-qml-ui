@@ -2,6 +2,10 @@
   <Folder Name="/Infrastructure/">
     <Project Path="Infrastructure/Infrastructure.fsproj" />
   </Folder>
+  <Folder Name="/Shared/">
+    <Project Path="Shared/Shared.fsproj" />
+    <Project Path="Shared.Tests/Shared.Tests.fsproj" />
+  </Folder>
   <Folder Name="/SirenManager/" />
   <Folder Name="/SirenManager/backend/" />
   <Folder Name="/SirenManager/backend/fsharpwebserver/">

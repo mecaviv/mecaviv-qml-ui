@@ -51,7 +51,7 @@ Build + Serveur + Ouverture du navigateur pour développement rapide.
 
 ```bash
 ./scripts/dev.sh sirenepupitre   # Port 8000
-./scripts/dev.sh sirenconsole    # Port 8001
+franz run console-server         # SirenConsole, port 8001 (serveur F#)
 ./scripts/dev.sh pedalier        # Port 8010
 ./scripts/dev.sh router          # Port 8002-8004
 ```
@@ -306,13 +306,13 @@ Qt WebAssembly nécessite Emscripten. Normalement installé avec Qt.
 
 ```bash
 # Développer sur un projet spécifique
-./scripts/dev.sh sirenconsole
+./scripts/dev.sh sirenepupitre
 
 # Modifier le code QML...
 # Ctrl+C pour arrêter le serveur
 
 # Rebuild et relancer
-./scripts/dev.sh sirenconsole
+./scripts/dev.sh sirenepupitre
 ```
 
 ### Nettoyage et rebuild complet

@@ -9,3 +9,6 @@ nuget Serilog.Extensions.Logging
 nuget Serilog.Sinks.Console
 nuget SSH.NET
 nuget UnMango.CliWrap.FSharp
+nuget Thoth.Json.Core
+nuget Thoth.Json.Newtonsoft
+nuget Expecto
