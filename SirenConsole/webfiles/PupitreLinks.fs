@@ -44,6 +44,9 @@ type Handlers =
     ParamChanged: string -> ParamPath -> JsonValue -> Task
     /// An event for the console's UI clients.
     Ui: ConsoleEvent -> Task
+    /// A position frame (0x01): playing, and the beat of the file (quarter notes) Pd's
+    /// [midifile] has reached, once per beat.
+    Position: string -> bool -> float -> unit
   }
 
 type private Link(pupitre: ConsolePupitre) =
@@ -89,6 +92,9 @@ type Links(pupitres: ConsolePupitre list, handlers: Handlers) =
   /// A JSON message to one pupitre, in a binary frame. False when it is not connected.
   let send (link: Link) (message: PupitreMessage) =
     sendBytes link (Encoding.UTF8.GetBytes(Encode.toString 0 (PupitreMessage.encode message)))
+
+  let sendJson (link: Link) (json: JsonValue) =
+    sendBytes link (Encoding.UTF8.GetBytes(Encode.toString 0 (JsonValue.encode json)))
 
   let onJson (link: Link) (text: string) =
     task {
@@ -181,7 +187,9 @@ type Links(pupitres: ConsolePupitre list, handlers: Handlers) =
           do! onJson link (Encoding.UTF8.GetString buffer)
         else
           link.Chunks <- Some(total, buffer, received)
-      | Position _ as f -> link.Playback.["position"] <- f
+      | Position(playing, _, _, beat) as f ->
+        link.Playback.["position"] <- f
+        handlers.Position id playing beat
       | FileInfo _ as f -> link.Playback.["file"] <- f
       | Tempo _ as f -> link.Playback.["tempo"] <- f
       | TimeSignature _ as f -> link.Playback.["timeSignature"] <- f
@@ -285,6 +293,26 @@ type Links(pupitres: ConsolePupitre list, handlers: Handlers) =
 
       for link in links.Values do
         let! sent = send link message
+
+        if sent then
+          n <- n + 1
+
+      return n
+    }
+
+  /// Any JSON message to one pupitre (the commands relayed as the UI sent them).
+  member _.SendJson(pupitreId: string, json: JsonValue) : Task<bool> =
+    match links.TryGetValue pupitreId with
+    | true, link -> sendJson link json
+    | _ -> Task.FromResult false
+
+  /// Any JSON message to every connected pupitre; how many got it.
+  member _.SendAllJson(json: JsonValue) : Task<int> =
+    task {
+      let mutable n = 0
+
+      for link in links.Values do
+        let! sent = sendJson link json
 
         if sent then
           n <- n + 1

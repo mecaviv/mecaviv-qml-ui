@@ -23,6 +23,9 @@ type Deps =
     Pupitres: Mecaviv.Shared.Config.ConsolePupitre list
     /// SirenConsole/config.js, served as /config.js (the QML UI loads it).
     ConfigJs: string
+    /// The compositions repository.
+    Compositions: string
+    Playback: Midi.Playback
   }
 
 let private json (status: int) (body: IEncodable) : HttpHandler =
@@ -91,25 +94,6 @@ let private volant (deps: Deps) : HttpHandler =
       |> Option.defaultValue Encode.nil
 
     json 200 (Encode.object [ "volantData", data ]) next ctx
-
-/// GET /api/puredata/playback: the MIDI sequencer's state. Until the sequencer is ported, the
-/// state server.js gives when nothing plays.
-let private playback: HttpHandler =
-  json
-    200
-    (Encode.object
-      [
-        "playing", Encode.bool false
-        "bar", Encode.int 1
-        "beatInBar", Encode.int 1
-        "beat", Encode.int 0
-        "position", Encode.int 0
-        "tempo", Encode.int 120
-        "duration", Encode.int 0
-        "totalBeats", Encode.int 0
-        "timeSignature", Encode.object [ "numerator", Encode.int 4; "denominator", Encode.int 4 ]
-        "file", Encode.string ""
-      ])
 
 /// POST /api/presets/current/upload: the current preset to every connected pupitre
 /// (CONSOLE_CONNECT, then its PARAM_UPDATE messages); each pupitre becomes synced.
@@ -237,7 +221,7 @@ let webApp (deps: Deps) : HttpHandler =
       GET >=> routef "/api/pupitres/%s/status" (oneStatus deps)
       GET >=> route "/api/puredata/status" >=> allStatus deps
       GET >=> routeStartsWith "/api/puredata/events" >=> events deps
-      GET >=> route "/api/puredata/playback" >=> playback
+      Midi.routes deps.Compositions deps.Playback deps.Links
       GET >=> route "/api/volant-data" >=> volant deps
       POST >=> route "/api/test/pupitre-connected" >=> testPupitreConnected deps
     ]

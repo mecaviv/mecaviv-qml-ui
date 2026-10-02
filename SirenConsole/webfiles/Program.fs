@@ -8,9 +8,10 @@ open Mecaviv.Infrastructure.Logging
 open Mecaviv.Infrastructure.Web
 
 /// SirenConsole's server, port 8001: the WebAssembly build, and what is ported from
-/// server.js so far: the presets, /api/config, the UI's WebSocket /ws and the links to the
-/// pupitres. The other routes still answer "port-in-progress" (server.js).
-/// SIRENCONSOLE_PORT and SIRENCONSOLE_PRESETS override the port and presets.json (tests).
+/// server.js so far: the presets, /api/config, the UI's WebSocket /ws, the links to the
+/// pupitres, the pieces and their playback.
+/// SIRENCONSOLE_PORT and SIRENCONSOLE_PRESETS override the port and presets.json (tests);
+/// SIRENCONSOLE_PREROLL_MS the sound's delay behind the score (M645.pd's [pipelist 5000]).
 
 [<EntryPoint>]
 let main _ =
@@ -31,6 +32,26 @@ let main _ =
     | Error e ->
       error $"config: {e}; no pupitre configured"
       []
+
+  let compositions =
+    Midi.compositionsDir (Path.GetFullPath(Path.Combine(root, "..", "..")))
+
+  let prerollMs =
+    match Double.TryParse(Environment.GetEnvironmentVariable "SIRENCONSOLE_PREROLL_MS") with
+    | true, ms -> ms
+    | _ -> 5000.0
+
+  let playback = Midi.Playback prerollMs
+
+  // The reference pupitre for the playback position: the first one of config.js that is
+  // connected (the links exist after the handlers, hence the reference cell).
+  let connected: (string -> bool) ref = ref (fun _ -> false)
+
+  let isReference id =
+    pupitres
+    |> List.filter (fun p -> p.Enabled)
+    |> List.tryFind (fun p -> connected.Value p.Id)
+    |> Option.exists (fun p -> p.Id = id)
 
   let presets = Presets.Store presetsFile
   let sync = UiSocket.SyncState()
@@ -79,9 +100,14 @@ let main _ =
                 do! hub.Send(Mecaviv.Shared.Console.PresetUpdatedFromPupitre(id, Some(path, value), nowMs ()))
           }
       Ui = fun event -> hub.Send event
+      Position =
+        fun id playing beat ->
+          if isReference id then
+            playback.OnPosition(playing, beat)
     }
 
   let links = PupitreLinks.Links(pupitres, handlers)
+  connected.Value <- links.IsConnected
   let status = links :> UiSocket.PupitreStatusSource
 
   // PARAM_UPDATE for synced pupitres, through their links.
@@ -100,6 +126,8 @@ let main _ =
       Hub = hub
       Pupitres = pupitres
       ConfigJs = configFile
+      Compositions = compositions
+      Playback = playback
     }
 
   /// The UI's WebSocket, then every HTTP route, before the static files (WebAssembly build).
@@ -117,7 +145,7 @@ let main _ =
       info $"SirenConsole listening on http://0.0.0.0:{port}/ ({root})"
       info $"presets: {presetsFile}"
       info $"config: {configFile}, {pupitres.Length} pupitre(s)"
-      info "MIDI routes are still served by server.js"
+      info $"compositions: {compositions}; sound {prerollMs} ms behind the score"
       links.Start())
     (fun builder -> builder.Services.AddGiraffe() |> ignore)
     (useStaticSiteWithApi configureApp root [ "appSirenConsole.html" ] true)
