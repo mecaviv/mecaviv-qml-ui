@@ -22,7 +22,7 @@ type Outcome =
   | Unreachable of string
 
 /// Runs one shell command on a machine. Errors come back as Error, not as exceptions.
-type Runner = bool -> string -> string -> Task<Result<string, string>>   // quiet, machine, command
+type Runner = bool -> string -> string -> CancellationToken -> Task<Result<string, string>>   // quiet, machine, command, deadline
 
 /// ssh could not reach the board (as opposed to the command failing on it).
 let isUnreachable (error: string) =
@@ -47,7 +47,7 @@ type StatRow =
     Stats: KindStats
     BusyPct: float option }
 
-/// How the throttle reads the past. Tuned for 2-3 s polls over ssh.
+/// How the throttle reads the past, and how long a request may take. Tuned for 2-3 s polls over ssh.
 type Policy =
   { /// A kind slower than this (smoothed) is held back ...
     SlowMs: float
@@ -56,11 +56,34 @@ type Policy =
     /// A board busier than this (percent) is polled at most every `BusyGapMs`.
     BusyPct: float
     BusyGapMs: float
-    TimeoutMs: int
+    /// How long a request of this kind may run before we stop waiting for it.
+    ///
+    /// Why a request needs a deadline at all: a command on a board can simply never come back. The
+    /// usual cause is `df`: it asks every mounted filesystem for its size, and if one of them is a
+    /// network share whose server stopped answering (the Mac's NFS share on the development
+    /// bench), `df` sits there until the share is back, and so does anything else that reads the
+    /// mount table. We only send one request at a time to a board, so everything queued behind a
+    /// request that never ends would wait for it for ever, and the whole tab would look frozen.
+    /// With a deadline the stuck request is answered with "timeout", the next ones go ahead, and
+    /// what was only trying to read the disk size shows an error instead of freezing the app.
+    ///
+    /// The deadline is short for what should be quick (a poll, a size read), longer for what is
+    /// slow by nature (the disk scan, a listing), and long for anything we cannot classify.
+    TimeoutMs: Kind -> int
     ReportEveryMs: int }
 
 let defaultPolicy =
-  { SlowMs = 1500.0; SlowFactor = 1.5; BusyPct = 85.0; BusyGapMs = 6000.0; TimeoutMs = 60000; ReportEveryMs = 60000 }
+  { SlowMs = 1500.0
+    SlowFactor = 1.5
+    BusyPct = 85.0
+    BusyGapMs = 6000.0
+    TimeoutMs =
+      function
+      | KSystem -> 10_000
+      | KCpu | KDmesg -> 15_000
+      | KDisk | KListing | KOwners -> 25_000
+      | KRaw -> 60_000
+    ReportEveryMs = 60000 }
 
 type private Msg =
   | Submit of machine: string * Request * quiet: bool * AsyncReplyChannel<Outcome>
@@ -75,7 +98,9 @@ type private Machine =
     mutable InFlight: bool
     mutable Cpu: CpuTimes option
     mutable BusyPct: float option
-    Started: Dictionary<Kind, DateTime> }
+    Started: Dictionary<Kind, DateTime>
+    /// Kinds whose last request ran into its deadline: not asked again for a while (see `blockFor`).
+    Blocked: Dictionary<Kind, DateTime> }
 
 type Scheduler =
   { Submit: string -> Request -> Task<Outcome>
@@ -92,6 +117,15 @@ let private record (st: KindStats) ms ok =
       LastMs = ms
       EwmaMs = if st.Count = 0 then ms else 0.7 * st.EwmaMs + 0.3 * ms }
 
+/// The requests that read the mount table (`df`) are the ones a stalled network share blocks, and
+/// every one that times out leaves a process stuck on the board for good. After one times out, the
+/// same kind is not sent again for this long: it is answered at once with an explanation, so the
+/// board is not buried under stuck processes (until sshd stops answering), and the app does not wait
+/// ten seconds each time.
+let blockFor = TimeSpan.FromMinutes 5.0
+
+let private readsMounts kind = kind = KSystem || kind = KDisk
+
 let start (policy: Policy) (run: Runner) : Scheduler =
   let agent =
     MailboxProcessor.Start(fun inbox ->
@@ -102,7 +136,7 @@ let start (policy: Policy) (run: Runner) : Scheduler =
         match machines.TryGetValue name with
         | true, m -> m
         | _ ->
-          let m = { Queue = Queue(); DownUntil = DateTime.MinValue; DownReason = ""; InFlight = false; Cpu = None; BusyPct = None; Started = Dictionary() }
+          let m = { Queue = Queue(); DownUntil = DateTime.MinValue; DownReason = ""; InFlight = false; Cpu = None; BusyPct = None; Started = Dictionary(); Blocked = Dictionary() }
           machines[name] <- m
           m
 
@@ -133,16 +167,19 @@ let start (policy: Policy) (run: Runner) : Scheduler =
           let work =
             task {
               let sw = Stopwatch.StartNew()
-              let job = run quiet name (command request)
-              let! winner = Task.WhenAny(job :> Task, Task.Delay policy.TimeoutMs)
+              use deadline = new CancellationTokenSource()
+              let job = run quiet name (command request) deadline.Token
+              let! winner = Task.WhenAny(job :> Task, Task.Delay(policy.TimeoutMs(kindOf request)))
 
               let! result =
                 task {
                   if obj.ReferenceEquals(winner, job) then
                     return! job
                   else
-                    // The ssh child is left to its own timeouts; the queue moves on.
-                    return Error $"timeout after {policy.TimeoutMs} ms"
+                    // Stop waiting, and stop the local ssh; the queue moves on. (What runs on the board
+                    // cannot be stopped from here: a stuck `df` stays stuck there.)
+                    deadline.Cancel()
+                    return Error $"timeout after {policy.TimeoutMs(kindOf request)} ms"
                 }
 
               inbox.Post(Finished(name, request, quiet, reply, sw.Elapsed.TotalMilliseconds, result))
@@ -189,7 +226,12 @@ let start (policy: Policy) (run: Runner) : Scheduler =
               else
                 None
 
+            let blockedUntil = match m.Blocked.TryGetValue kind with | true, t -> t | _ -> DateTime.MinValue
+
             match hold with
+            | None when readsMounts kind && DateTime.UtcNow < blockedUntil ->
+              let secs = int (blockedUntil - DateTime.UtcNow).TotalSeconds
+              reply.Reply(Failed $"df ne répond pas (partage réseau bloqué ?) : pas de nouvel essai avant {secs} s")
             | None when quiet && DateTime.UtcNow < m.DownUntil -> reply.Reply(Unreachable m.DownReason)
             | Some ms ->
               stats[(name, kind)] <- { statsOf name kind with Throttled = (statsOf name kind).Throttled + 1 }
@@ -215,6 +257,8 @@ let start (policy: Policy) (run: Runner) : Scheduler =
 
               reply.Reply(Output output)
             | Error e ->
+              if readsMounts kind && e.StartsWith "timeout" then m.Blocked[kind] <- DateTime.UtcNow + blockFor
+
               if isUnreachable e then
                 m.DownUntil <- DateTime.UtcNow.AddSeconds 20.0
                 m.DownReason <- e

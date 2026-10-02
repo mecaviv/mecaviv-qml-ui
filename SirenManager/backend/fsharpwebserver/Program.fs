@@ -1,5 +1,6 @@
 module SirenManager.Backend.Program
 
+open System
 open System.Threading.Tasks
 open Giraffe
 open Microsoft.AspNetCore.Builder
@@ -14,13 +15,14 @@ let hub = UdpRelay.Hub cfg.UdpPort
 
 /// One mailbox for every ssh `execute`: serialised per machine, timed, throttled.
 let scheduler =
-  Scheduler.start Scheduler.defaultPolicy (fun quiet machine command ->
+  Scheduler.start Scheduler.defaultPolicy (fun quiet machine command deadline ->
     task {
       try
-        let! out = (if quiet then SshProxy.executeQuiet else SshProxy.execute) cfg machine command
+        let! out = SshProxy.executeCt deadline quiet cfg machine command
         return Ok out
       with
       | SshProxy.SshError msg -> return Error msg
+      | :? OperationCanceledException -> return Error "cancelled"
       | ex -> return Error ex.Message
     })
 

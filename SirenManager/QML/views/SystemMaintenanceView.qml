@@ -423,6 +423,11 @@ Rectangle {
                         var all = output.split("\n"), at = all.findIndex(function(l) { return l.indexOf("Filesystem") === 0 })
                         if (at >= 0) diskDetailArea.text = "<pre style=\"margin:0\">" + fsSummary(all.slice(at)) + "</pre>"
                     }
+                else if (!diskDetailLoaded) {
+                    // Most often a network share that stopped answering: df waits for it.
+                    diskDetailArea.text = "<span style=\"color:#d98a7a\">Lecture de l'espace disque impossible :</span><br>"
+                                          + esc(error || "pas de réponse") + "<br><span style=\"color:#888\">(sur le banc : le montage NFS de la carte ?)</span>"
+                }
                 }
             } else if (requestId === "dmesg") {
                 dmesgRaw = success ? output : "Erreur: " + error
@@ -434,6 +439,7 @@ Rectangle {
                     playlists = pls
                     playlistStatus.text = pls.length + " playlist(s)"
                     requestMidiInfo(pls)
+                    if (currentMachine().id === 0) UdpManager.sendAskSynchro(0)       // what is playing now?
                 } else {
                     playlistStatus.text = "Erreur: " + error
                 }
@@ -734,6 +740,24 @@ Rectangle {
     property var playlists: []
     property var midiInfo: ({})               // MIDI file name -> what the file says (backend /api/midi/info)
 
+    // The song the Maitre is playing. Its sequencer pushes an "RU" frame (running, slot) when a song
+    // starts or stops and "TI" frames with the elapsed time; the shared UdpManager parses them (the
+    // Player tab uses the same). The slot is that of the Maitre's active playlist, so the mark is
+    // drawn on that playlist's column, and only while the Maitre is the machine shown.
+    property bool playingRunning: false
+    property int playingSlot: -1
+    property int playingElapsed: 0
+    readonly property int playingMark: playingRunning && currentMachine().id === 0 ? playingSlot : -1
+    Connections {
+        target: UdpManager
+        function onRunningStateChanged(running, slotIndex) {
+            root.playingRunning = running
+            root.playingSlot = running ? slotIndex : -1
+            if (!running) root.playingElapsed = 0
+        }
+        function onTimingUpdated(currentSeconds) { root.playingElapsed = currentSeconds }
+    }
+
     // MIDI facts come in gradually. The playlists name some files, many of them in
     // several playlists: each distinct file is asked about once. The backend runs a
     // job: readings it already holds (size and mtime unchanged) come first, the rest
@@ -833,7 +857,7 @@ Rectangle {
 
     // Playlists with their MIDI facts and the text widths that fit them: each
     // column is as wide as its longest row, no wider.
-    function buildPlaylistsView(pls, info, reading, failed, busyReading) {
+    function buildPlaylistsView(pls, info, reading, failed, busyReading, playingSlot) {
         var maxDur = 1
         pls.forEach(function(p) { p.entries.forEach(function(e) {
             var i = info[e.file]; if (i && i.durationSec) maxDur = Math.max(maxDur, i.durationSec)
@@ -872,6 +896,7 @@ Rectangle {
                               + "\ncanaux " + fmtChannels(i.channels)
                               + (i.tempoChanges > 1 ? "\n" + i.tempoChanges + " changements de tempo" : "")
                 return {
+                    playing: p.active && playingSlot >= 0 && e.slot === playingSlot,
                     slot: e.slot, label: e.pseudo !== "" ? e.pseudo : e.file, loop: e.loop, chain: e.chain,
                     state: state, mark: mark, markColor: markColor,
                     dur: ok ? fmtDur(i.durationSec) : state === "reading" ? "…" : state === "failed" ? "✗" : "", durFrac: ok ? i.durationSec / maxDur : 0,
@@ -887,7 +912,7 @@ Rectangle {
             }
         })
     }
-    readonly property var playlistsView: buildPlaylistsView(playlists, midiInfo, midiReading, midiFailed, midiJob !== "")
+    readonly property var playlistsView: buildPlaylistsView(playlists, midiInfo, midiReading, midiFailed, midiJob !== "", playingMark)
     TextMetrics { id: monoM; font.family: "Menlo"; font.pixelSize: 11; text: "0000000000" }
     readonly property real charW: monoM.advanceWidth / 10
 
@@ -1705,12 +1730,22 @@ Rectangle {
                                         width: ListView.view.width; height: 20
                                         ToolTip.visible: hov.hovered
                                         ToolTip.delay: 600
-                                        ToolTip.text: r.tip
+                                        ToolTip.text: r.tip + (r.playing ? "\nen cours de lecture : " + root.fmtDur(root.playingElapsed) : "")
                                         HoverHandler { id: hov }
+                                        Rectangle {                                    // the song that is playing
+                                            visible: plRowItem.r.playing
+                                            anchors.fill: parent
+                                            color: "#33ff9f1a"
+                                            Rectangle { width: 2; height: parent.height; color: "#ff9f1a" }
+                                        }
                                         Row {
                                             anchors.verticalCenter: parent.verticalCenter
                                             spacing: 6
-                                            Label { width: plBox.cw * 2; horizontalAlignment: Text.AlignRight; text: plRowItem.r.slot; color: "#777"; font.family: "Menlo"; font.pixelSize: 11 }
+                                            Label {
+                                                width: plBox.cw * 2; horizontalAlignment: Text.AlignRight
+                                                text: plRowItem.r.playing ? "▶" : plRowItem.r.slot
+                                                color: plRowItem.r.playing ? "#ff9f1a" : "#777"; font.family: "Menlo"; font.pixelSize: 11
+                                            }
                                             Label { width: plBox.cw * plBox.modelDataChars("labelChars"); text: plRowItem.r.label; color: "#ddd"; font.family: "Menlo"; font.pixelSize: 11 }
                                             Label {
                                                 visible: width > 0

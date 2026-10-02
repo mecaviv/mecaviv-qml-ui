@@ -86,11 +86,19 @@ let catch (ctx: HttpContext) work =
 
 /// Every `execute` goes through the scheduler: one request at a time per
 /// machine, timed, counted, and polls held back when the board is struggling.
-let execute (sched: Scheduler.Scheduler) =
+let execute cfg (sched: Scheduler.Scheduler) =
   fun _ ctx ->
     catch ctx (fun () ->
       task {
         let! root = readRoot ctx
+
+        // The Reboot buttons send exactly "reboot": that one is run as root (see SshProxy.rebootAsRoot).
+        if (str root "command").Trim() = "reboot" then
+          let machine = str root "machineType"
+          info $"reboot {machine} (as root)"
+          do! SshProxy.rebootAsRoot cfg machine
+          return! writeJson ctx 200 (ok [ "output", jstr "" ])
+        else
         let! outcome = sched.Submit (str root "machineType") (Protocol.Raw(str root "command"))
 
         match outcome with
@@ -677,7 +685,7 @@ let exportKeys =
 let webApp cfg (sched: Scheduler.Scheduler) =
   choose
     [
-      POST >=> route "/api/ssh/execute" >=> execute sched
+      POST >=> route "/api/ssh/execute" >=> execute cfg sched
       POST >=> route "/api/ssh/batch" >=> batch sched
       POST >=> route "/api/midi/scan" >=> midiScan cfg
       POST >=> route "/api/midi/scan/poll" >=> midiScanPoll

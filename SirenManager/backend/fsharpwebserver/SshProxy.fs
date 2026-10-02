@@ -52,28 +52,28 @@ let baseOptions =
     "-o"; "ForwardX11=no" ]
 
 /// OpenSSH argv, unchanged. CliWrap replaces Process.
-let runBytesQ (quiet: bool) label sshTarget remoteCommand stdin =
+let runBytesCt (ct: System.Threading.CancellationToken) (quiet: bool) label sshTarget remoteCommand stdin =
   task {
     use stdoutBytes = new MemoryStream()
     let stderrText = StringBuilder()
 
     let input =
       match stdin with
-      | Some bytes -> ReadFrom.bytes bytes
-      | None -> ReadFrom.devnull
+      | Some(bytes: byte[]) -> PipeSource.FromBytes bytes
+      | None -> PipeSource.Null
 
     let sw = System.Diagnostics.Stopwatch.StartNew()
 
+    // Cancelling the token kills the local ssh client (the request's deadline is over).
     let! result =
-      command "ssh" {
-        args (baseOptions @ muxOptions @ [ sshTarget; remoteCommand ])
-
-        validation CommandResultValidation.None
-        stdin input
-        stdout (PipeTo.stream stdoutBytes)
-        stderr (PipeTo.string stderrText)
-        exec
-      }
+      Cli
+        .Wrap("ssh")
+        .WithArguments(baseOptions @ muxOptions @ [ sshTarget; remoteCommand ])
+        .WithValidation(CommandResultValidation.None)
+        .WithStandardInputPipe(input)
+        .WithStandardOutputPipe(PipeTarget.ToStream stdoutBytes)
+        .WithStandardErrorPipe(PipeTarget.ToStringBuilder stderrText)
+        .ExecuteAsync(ct)
 
     let bytes = stdoutBytes.ToArray()
     let stderr = stderrText.ToString()
@@ -100,6 +100,9 @@ let runBytesQ (quiet: bool) label sshTarget remoteCommand stdin =
 
     return bytes
   }
+
+let runBytesQ quiet label sshTarget remoteCommand stdin =
+  runBytesCt System.Threading.CancellationToken.None quiet label sshTarget remoteCommand stdin
 
 let runBytes label sshTarget remoteCommand stdin = runBytesQ false label sshTarget remoteCommand stdin
 
@@ -184,6 +187,40 @@ let streamLines cfg machineType (remoteCommand: string) (onLine: string -> unit)
 
       return result.ExitCode
     with :? OperationCanceledException -> return -1
+  }
+
+/// Reboots a board. `guest` may not (BusyBox says "no permission to run this applet"), `root` may,
+/// so this one command is run as root (`-l root` keeps the host alias, hence the same keys and the
+/// old key-exchange settings from ~/.ssh/config). It is the only thing run as root, and on its own
+/// connection: no shared one is kept open for root. The board drops the link while rebooting, which
+/// is what success looks like; only a failure to connect is an error.
+let rebootAsRoot cfg machineType =
+  task {
+    let stderrText = StringBuilder()
+
+    let! result =
+      Cli
+        .Wrap("ssh")
+        .WithArguments(baseOptions @ [ "-o"; "ControlMaster=no"; "-o"; "ControlPath=none"; "-l"; "root"; target cfg machineType; "reboot" ])
+        .WithValidation(CommandResultValidation.None)
+        .WithStandardErrorPipe(PipeTarget.ToStringBuilder stderrText)
+        .ExecuteAsync()
+
+    let err = stderrText.ToString()
+
+    let refused =
+      [ "timed out"; "No route"; "refused"; "Could not resolve"; "Permission denied"; "banner" ]
+      |> List.exists (fun k -> err.Contains(k, StringComparison.OrdinalIgnoreCase))
+
+    if result.ExitCode <> 0 && refused then
+      raise (SshError $"reboot: {err.Trim()}")
+  }
+
+/// `execute`, stoppable: the token is the request's deadline (see Scheduler.Policy.TimeoutMs).
+let executeCt (ct: System.Threading.CancellationToken) (quiet: bool) cfg machineType command =
+  task {
+    let! bytes = runBytesCt ct quiet "ssh" (target cfg machineType) command None
+    return Encoding.UTF8.GetString bytes
   }
 
 let execute cfg machineType command =

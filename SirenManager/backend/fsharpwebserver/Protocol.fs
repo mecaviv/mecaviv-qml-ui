@@ -62,6 +62,7 @@ let kindOf =
     if c.Contains "/proc/[0-9]*/stat" then KCpu
     elif c.StartsWith "dmesg" then KDmesg
     elif c.Contains "du -sk" then KDisk
+    elif Regex.IsMatch(c, @"(^|[;&| ])df($|[ ;])") then KSystem       // meminfo + df: sizes, should be quick
     else KRaw
 
 /// Polls are cheap one by one and expensive in number: they are the ones to slow down.
