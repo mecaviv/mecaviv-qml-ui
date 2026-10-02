@@ -64,3 +64,5 @@ if(EMSCRIPTEN)
         SUFFIX ".js"
     )
 endif()
+
+copy_to_webfiles(appSirenConsole ${CMAKE_CURRENT_SOURCE_DIR}/webfiles)

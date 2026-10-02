@@ -54,3 +54,5 @@ install(TARGETS appSirenePupitre
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
+
+copy_to_webfiles(appSirenePupitre ${CMAKE_CURRENT_SOURCE_DIR}/webfiles)
