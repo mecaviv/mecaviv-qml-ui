@@ -16,6 +16,7 @@
     <Compile Include="Midi.fs" />
     <Compile Include="MidiCache.fs" />
     <Compile Include="MidiScan.fs" />
+    <Compile Include="Sim.fs" />
     <Compile Include="Scheduler.fs" />
     <Compile Include="UdpRelay.fs" />
     <Compile Include="Api.fs" />

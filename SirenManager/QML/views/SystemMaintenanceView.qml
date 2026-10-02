@@ -1203,6 +1203,14 @@ Rectangle {
                 Item { Layout.fillWidth: true }
 
                 Button {
+                    text: "Simulation"
+                    Layout.preferredHeight: 32
+                    onClicked: simDialog.open()
+                    ToolTip.visible: hovered && ToolTip.text.length > 0
+                    ToolTip.delay: 600
+                    ToolTip.text: root.tip("simulation")
+                }
+                Button {
                     text: "Tout rafraîchir"
                     Layout.preferredHeight: 32
                     onClicked: refreshAll()
@@ -1833,6 +1841,8 @@ Rectangle {
         } // StyledSplitView (DMESG / PLAYLISTS + MIDI)
         } // StyledSplitView (SYSTEM INFO / rest)
     }
+
+    SimulationDialog { id: simDialog; anchors.centerIn: parent }
 
     // ==================== EXPORT KEYS ARCHIVE ====================
     // Bundles ~/.ssh/id_rsa_sirenes(.pub) + Host blocks for the 13 siren

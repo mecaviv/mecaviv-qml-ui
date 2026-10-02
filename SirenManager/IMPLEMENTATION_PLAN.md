@@ -129,6 +129,25 @@ SystemMaintenance, PlaylistComposer, sirènes S1–S7 + Maître + Pi5).
   (`derniere_liste`) ; il faut que l'application soit enregistrée comme interface côté Maître (le
   bouton « synchro » du Player le fait ; l'onglet SYSTÈME envoie aussi `sendAskSynchro` à l'affichage).
 
+### Simulation de bout en bout (banc de dev)
+Chaîne : **SirenManager (Player) → carte de dev avec `m_seq_sim.ko` → tap UDP 9000 → `tap-viewer midi` →
+source MIDI virtuelle `m_seq_sim` → ComposeSiren**. La carte joue les morceaux de ses playlists avec le vrai
+code du séquenceur (tous les canaux 1-7) ; l'application envoie les commandes V1 habituelles.
+- Bouton **Simulation** (barre du haut de l'onglet SYSTÈME) : état de la carte (module, maître), du tap, du DSP,
+  ligne de progression de tap-viewer ; *Démarrer* / *Arrêter et restaurer*.
+- Le backend ne fait que lancer `tap-viewer` : `tap-viewer sim up|down|status HOST` (échange du module,
+  firmwares-artila/tools/tap-viewer, sur main) et `tap-viewer midi 9000 --virtual m_seq_sim --channels 1-7`
+  (écoute, gardé comme processus fils). Aucune logique d'échange de module n'est dupliquée côté F#.
+- Refusé sauf si le backend est lancé avec **`SIREN_ALLOW_SIM=1`** (l'application sert aussi en production,
+  seule la carte de dev doit être échangée). Le binaire est trouvé via `SIREN_TAP_VIEWER` ou le checkout
+  `firmwares-artila` (`franz run tap-viewer -- midi --list` le construit).
+  Ex. : `SIREN_ALLOW_SIM=1 dotnet watch --non-interactive --project SirenManager/backend/fsharpwebserver`.
+- Testé : aller-retour `up`/`down` (idempotent) sur la carte, démarrage/arrêt par le backend, ComposeSiren
+  branché automatiquement sur la source. Pas encore testé avec un morceau lancé depuis le Player.
+- À construire ensuite (idées) : scénarios de charge pilotés depuis l'application (enchaîner toute une playlist,
+  stop/reset rapides, charger des playlists alternées) avec verdict (retards de tap-viewer, `dmesg` sans oops,
+  longueurs jouées = longueurs du fichier), et un « morceau en cours » alimenté par la simulation.
+
 ### À faire
 - [ ] Valider Reboot en root sur une carte (le banc vient d'être redémarré à la main).
 - [ ] Lecture de `df` sans passer par `/proc/mounts` si possible, ou le retirer du suivi automatique.

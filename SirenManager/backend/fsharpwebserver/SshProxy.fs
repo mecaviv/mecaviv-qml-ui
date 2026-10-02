@@ -223,6 +223,31 @@ let executeCt (ct: System.Threading.CancellationToken) (quiet: bool) cfg machine
     return Encoding.UTF8.GetString bytes
   }
 
+/// A command run as root (see `rebootAsRoot` for why root, and why on its own connection). Only the
+/// fixed commands of the simulation use it. Returns stdout; a non-zero exit is an error.
+let executeAsRoot cfg machineType (command: string) =
+  task {
+    let out = StringBuilder()
+    let err = StringBuilder()
+
+    let! result =
+      Cli
+        .Wrap("ssh")
+        .WithArguments(baseOptions @ [ "-o"; "ControlMaster=no"; "-o"; "ControlPath=none"; "-l"; "root"; target cfg machineType; command ])
+        .WithValidation(CommandResultValidation.None)
+        .WithStandardInputPipe(PipeSource.Null)
+        .WithStandardOutputPipe(PipeTarget.ToStringBuilder out)
+        .WithStandardErrorPipe(PipeTarget.ToStringBuilder err)
+        .ExecuteAsync()
+
+    if result.ExitCode <> 0 then
+      let detail = (err.ToString() + out.ToString()).Trim()
+      let shown = if detail = "" then "no output" else detail
+      raise (SshError $"as root, exit {result.ExitCode}: {shown}")
+
+    return out.ToString()
+  }
+
 let execute cfg machineType command =
   task {
     let! bytes = runBytes "ssh" (target cfg machineType) command None

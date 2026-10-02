@@ -335,6 +335,36 @@ let midiScanCancel =
       return! writeJson ctx 200 (ok [])
     }
 
+/// The simulation chain (see Sim.fs): {machineType?} -> its state; start and stop swap the board's module.
+let private simMachine root = match str root "machineType" with | "" -> Sim.maitre | m -> m
+
+let simStatus cfg =
+  fun _ ctx ->
+    catch ctx (fun () ->
+      task {
+        let! root = readRoot ctx
+        let! st = Sim.status cfg (simMachine root)
+        return! writeJson ctx 200 (ok [ "sim", (st :> JsonNode) ])
+      })
+
+let simStart cfg =
+  fun _ ctx ->
+    catch ctx (fun () ->
+      task {
+        let! root = readRoot ctx
+        let! st = Sim.start cfg (simMachine root)
+        return! writeJson ctx 200 (ok [ "sim", (st :> JsonNode) ])
+      })
+
+let simStop cfg =
+  fun _ ctx ->
+    catch ctx (fun () ->
+      task {
+        let! root = readRoot ctx
+        let! st = Sim.stop cfg (simMachine root)
+        return! writeJson ctx 200 (ok [ "sim", (st :> JsonNode) ])
+      })
+
 /// Per (machine, kind) request counts, runtimes and throttling, plus the last CPU reading.
 let sshStats (sched: Scheduler.Scheduler) =
   fun _ ctx ->
@@ -687,6 +717,9 @@ let webApp cfg (sched: Scheduler.Scheduler) =
     [
       POST >=> route "/api/ssh/execute" >=> execute cfg sched
       POST >=> route "/api/ssh/batch" >=> batch sched
+      POST >=> route "/api/sim/status" >=> simStatus cfg
+      POST >=> route "/api/sim/start" >=> simStart cfg
+      POST >=> route "/api/sim/stop" >=> simStop cfg
       POST >=> route "/api/midi/scan" >=> midiScan cfg
       POST >=> route "/api/midi/scan/poll" >=> midiScanPoll
       POST >=> route "/api/midi/scan/cancel" >=> midiScanCancel
