@@ -12,6 +12,9 @@ ApplicationWindow {
     height: 700
     title: "SirenManager - Contrôle des Sirènes Mecaviv"
 
+    // For the windows of the app that have to bring the user somewhere (the simulation dialog).
+    function showTab(index) { tabBar.currentIndex = index }
+
     // Tooltips: keep the default translucent background, text in a soft orange
     // (the default dark text was unreadable on the dark theme).
     palette.toolTipText: "#f0a54a"

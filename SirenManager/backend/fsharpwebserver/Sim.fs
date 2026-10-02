@@ -65,7 +65,8 @@ type private Tap =
     Forceful: CancellationTokenSource
     Started: DateTime
     mutable Exited: bool
-    mutable ExitCode: int }
+    mutable ExitCode: int
+    mutable Pid: int }
 
 let mutable private tap: Tap option = None
 let private gate = obj ()
@@ -80,6 +81,13 @@ let private tapLines n =
   | Some t -> lock t.Lines (fun () -> t.Lines |> Seq.rev |> Seq.truncate n |> Seq.rev |> List.ofSeq)
   | None -> []
 
+/// Where the tap is played: a virtual MIDI source called m_seq_sim (macOS, Linux), or the existing
+/// port named by SIREN_TAP_PORT (Windows has no virtual sources: a loopMIDI port, for instance).
+let midiOutput () =
+  match Environment.GetEnvironmentVariable "SIREN_TAP_PORT" with
+  | null | "" -> [ "--virtual"; "m_seq_sim" ]
+  | name -> [ "--port"; name ]
+
 /// Starts `tap-viewer midi 9000 --virtual m_seq_sim --channels 1-7` and keeps its output.
 let private startTap (path: string) =
   let t =
@@ -88,7 +96,8 @@ let private startTap (path: string) =
       Forceful = new CancellationTokenSource()
       Started = DateTime.UtcNow
       Exited = false
-      ExitCode = 0 }
+      ExitCode = 0
+      Pid = 0 }
 
   let onLine (l: string) =
     let l = plain l
@@ -106,15 +115,17 @@ let private startTap (path: string) =
 
   task {
     try
-      let! r =
+      let running =
         Cli
           .Wrap(path)
-          .WithArguments([ "midi"; string tapPort; "--virtual"; "m_seq_sim"; "--channels"; "1-7"; "--progress" ])
+          .WithArguments([ "midi"; string tapPort ] @ midiOutput () @ [ "--channels"; "1-7"; "--progress" ])
           .WithValidation(CommandResultValidation.None)
           .WithStandardOutputPipe(PipeTarget.ToDelegate onLine)
           .WithStandardErrorPipe(PipeTarget.ToDelegate onLine)
           .ExecuteAsync(t.Forceful.Token, t.Graceful.Token)
 
+      t.Pid <- running.ProcessId
+      let! r = running
       t.ExitCode <- r.ExitCode
     with _ ->
       t.ExitCode <- -1
@@ -123,6 +134,37 @@ let private startTap (path: string) =
     info $"tap-viewer ended ({t.ExitCode})"
   }
   |> ignore
+
+/// tap-viewer processes this backend does not know: started by a backend that has since restarted
+/// (a rebuild under `dotnet watch` does that), still holding the tap's UDP port.
+let private orphans () =
+  let mine = match tap with | Some t when not t.Exited -> t.Pid | _ -> 0
+
+  try
+    Diagnostics.Process.GetProcessesByName "tap-viewer" |> Array.filter (fun p -> p.Id <> mine) |> List.ofArray
+  with _ ->
+    []
+
+/// Ends them like Ctrl-C first (the tap-viewer silences the notes it started), then by force.
+let private killOrphans () =
+  task {
+    for p in orphans () do
+      try
+        if not (OperatingSystem.IsWindows()) then
+          let! _ = Cli.Wrap("kill").WithArguments([ "-INT"; (string p.Id) ]).WithValidation(CommandResultValidation.None).ExecuteAsync()
+          ()
+
+        let mutable waited = 0
+
+        while not p.HasExited && waited < 30 do
+          do! Task.Delay 100
+          waited <- waited + 1
+
+        if not p.HasExited then p.Kill()
+        info $"simulation: an old tap-viewer (pid {p.Id}) was ended"
+      with _ ->
+        ()
+  }
 
 /// Interrupts the tap-viewer like Ctrl-C (it silences the notes), then kills it if it lingers.
 let private stopTap () =
@@ -228,6 +270,7 @@ let status cfg machine =
     let o = JsonObject()
     o["allowed"] <- JsonValue.Create(allowed ())
     o["machine"] <- JsonValue.Create machine
+    o["boardAddress"] <- JsonValue.Create(try ipOf cfg machine with _ -> "")
 
     let bo = JsonObject()
     bo["reachable"] <- JsonValue.Create b.Reachable
@@ -239,7 +282,10 @@ let status cfg machine =
 
     let to_ = JsonObject()
     to_["tapViewerFound"] <- JsonValue.Create((findTapViewer ()).IsSome)
+    to_["tapViewerPath"] <- JsonValue.Create(defaultArg (findTapViewer ()) "")
+    to_["output"] <- JsonValue.Create(String.Join(" ", midiOutput ()))
     to_["running"] <- JsonValue.Create(tapRunning ())
+    to_["orphans"] <- JsonValue.Create(List.length (orphans ()))
     to_["port"] <- JsonValue.Create tapPort
     let lines = JsonArray()
     for l in tapLines 25 do lines.Add(JsonValue.Create l)
@@ -276,6 +322,9 @@ let start cfg machine =
 
     // 1. The tap must have a listener before the board starts sending.
     if not (tapRunning ()) then
+      do! killOrphans ()
+      do! Task.Delay 300
+
       if not (portIsFree ()) then failwith $"UDP {tapPort} is taken by another program"
       startTap viewer
       do! Task.Delay 1500
@@ -301,6 +350,7 @@ let stop cfg machine =
   task {
     refuse ()
     do! stopTap ()
+    do! killOrphans ()
 
     match findTapViewer () with
     | Some viewer ->

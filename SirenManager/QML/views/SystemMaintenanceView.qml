@@ -1203,7 +1203,7 @@ Rectangle {
                 Item { Layout.fillWidth: true }
 
                 Button {
-                    text: "Simulation"
+                    text: "Simulation" + (simDialog.running ? "  ●" : "")
                     Layout.preferredHeight: 32
                     onClicked: simDialog.open()
                     ToolTip.visible: hovered && ToolTip.text.length > 0
@@ -1842,7 +1842,7 @@ Rectangle {
         } // StyledSplitView (SYSTEM INFO / rest)
     }
 
-    SimulationDialog { id: simDialog; anchors.centerIn: parent }
+    SimulationDialog { id: simDialog; parentWindow: root.Window.window; ownerVisible: root.visible }
 
     // ==================== EXPORT KEYS ARCHIVE ====================
     // Bundles ~/.ssh/id_rsa_sirenes(.pub) + Host blocks for the 13 siren

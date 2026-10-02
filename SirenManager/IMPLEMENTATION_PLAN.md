@@ -133,8 +133,13 @@ SystemMaintenance, PlaylistComposer, sirènes S1–S7 + Maître + Pi5).
 Chaîne : **SirenManager (Player) → carte de dev avec `m_seq_sim.ko` → tap UDP 9000 → `tap-viewer midi` →
 source MIDI virtuelle `m_seq_sim` → ComposeSiren**. La carte joue les morceaux de ses playlists avec le vrai
 code du séquenceur (tous les canaux 1-7) ; l'application envoie les commandes V1 habituelles.
-- Bouton **Simulation** (barre du haut de l'onglet SYSTÈME) : état de la carte (module, maître), du tap, du DSP,
-  ligne de progression de tap-viewer ; *Démarrer* / *Arrêter et restaurer*.
+- Bouton **Simulation** (barre du haut de l'onglet SYSTÈME, un ● quand elle tourne) : ouvre une **fenêtre** non modale
+  (déplaçable, on peut continuer à utiliser le Player) : état de la carte (module, maître), du tap, du DSP, ligne de
+  progression de tap-viewer ; *Démarrer* / *Arrêter et restaurer la carte* / *Aller au Player*. Section *Dépannage*
+  avec des commandes **copiables** (macOS/Linux, PowerShell, cmd) : relancer le backend avec `SIREN_ALLOW_SIM=1`,
+  construire ou localiser tap-viewer (`SIREN_TAP_VIEWER`), sortie MIDI sans source virtuelle (`SIREN_TAP_PORT`, Windows :
+  port loopMIDI), remettre la carte (`tap-viewer sim down ADRESSE`). Un tap-viewer resté d'un backend redémarré est
+  détecté et fermé par *Arrêter* / *Démarrer*.
 - Le backend ne fait que lancer `tap-viewer` : `tap-viewer sim up|down|status HOST` (échange du module,
   firmwares-artila/tools/tap-viewer, sur main) et `tap-viewer midi 9000 --virtual m_seq_sim --channels 1-7`
   (écoute, gardé comme processus fils). Aucune logique d'échange de module n'est dupliquée côté F#.
