@@ -101,10 +101,9 @@ Rectangle {
 
 ## 🚀 **Démarrage**
 
-### **1. Serveur Node.js**
+### **1. Serveur (F#)**
 ```bash
-cd SirenConsole/webfiles
-node server.js
+franz run console-server   # SirenConsole/webfiles, voir son README.md
 ```
 
 ### **2. Application QML**

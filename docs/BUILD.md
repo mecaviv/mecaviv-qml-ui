@@ -310,7 +310,7 @@ Build + serveur + ouverture Chrome.
 
 ```bash
 ./scripts/dev.sh sirenepupitre   # Port 8000
-./scripts/dev.sh sirenconsole    # Port 8001
+franz run console-server         # SirenConsole, port 8001 (serveur F#)
 ./scripts/dev.sh pedalier        # Port 8010
 ./scripts/dev.sh router          # Ports 8002-8004
 ```
@@ -493,7 +493,7 @@ cmake --build build-wasm
 # Les fichiers sont copiés dans webfiles/
 # Lancer les serveurs
 cd SirenePupitre/webfiles && node server.js 8000 &
-cd SirenConsole/webfiles && node server.js 8001 &
+franz run console-server   # SirenConsole, 8001
 cd pedalierSirenium/webfiles && node server.js 8010 &
 ```
 

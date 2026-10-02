@@ -46,4 +46,7 @@ Every route and WebSocket message of `server.js` that something uses. Each step 
 
 - `PUPITRE_IDENTIFICATION` and the relay of Pd's `GAME_MODE` to the UI: nothing sends the first, nothing handles the second (`NODE_CODEBASE.md`).
 - The `0x06` tick frames `midi-sequencer.js` broadcast to the pupitres and UI clients from its own clock.
-- The switch itself: `SirenConsole/scripts/run.sh` and `scripts/dev.sh` still start `server.js`.
+
+## Starting it
+
+`franz run console-server` builds and starts it (and stops a running one); `franz stop console-server`, `franz logs console-server -f`. The WebAssembly page: `franz build qml-ui -p wasm -t console`. `server.js` and its modules stay beside it for comparison until they are removed.
