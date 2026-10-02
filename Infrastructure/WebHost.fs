@@ -148,7 +148,11 @@ let useStaticSiteWithApi (api: WebApplication -> unit) (root: string) (defaultFi
 let useStaticSite (root: string) (defaultFiles: string list) (wasm: bool) (app: WebApplication) =
   useStaticSiteWithApi ignore root defaultFiles wasm app
 
-let run (spec: HostSpec) (announce: unit -> unit) (setup: WebApplicationBuilder -> unit) (configure: WebApplication -> unit) =
+/// A certificate and its key, PEM files (as Node's https.createServer reads them).
+type Tls = { CertificatePem: string; KeyPem: string }
+
+/// `run`, every port serving HTTPS (and WSS) when a certificate is given.
+let runWith (tls: Tls option) (spec: HostSpec) (announce: unit -> unit) (setup: WebApplicationBuilder -> unit) (configure: WebApplication -> unit) =
   start spec.LogLevel
   announce ()
 
@@ -156,9 +160,20 @@ let run (spec: HostSpec) (announce: unit -> unit) (setup: WebApplicationBuilder 
   builder.Logging.ClearProviders() |> ignore
   builder.Logging.AddSerilog(Log.Logger, dispose = true) |> ignore
 
+  let certificate =
+    tls
+    |> Option.map (fun t ->
+      let pem =
+        System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromPemFile(t.CertificatePem, t.KeyPem)
+      // a PEM key is ephemeral, which macOS's TLS refuses: go through PKCS#12
+      System.Security.Cryptography.X509Certificates.X509CertificateLoader.LoadPkcs12(
+        pem.Export System.Security.Cryptography.X509Certificates.X509ContentType.Pkcs12, null))
+
   builder.WebHost.ConfigureKestrel(fun options ->
     for port in spec.Ports do
-      options.ListenAnyIP port
+      match certificate with
+      | Some cert -> options.ListenAnyIP(port, fun listen -> listen.UseHttps(cert) |> ignore)
+      | None -> options.ListenAnyIP port
 
     options.Limits.MaxRequestBodySize <- spec.MaxRequestBodyBytes)
   |> ignore
@@ -168,3 +183,6 @@ let run (spec: HostSpec) (announce: unit -> unit) (setup: WebApplicationBuilder 
   configure app
   app.Run()
   0
+
+let run (spec: HostSpec) (announce: unit -> unit) (setup: WebApplicationBuilder -> unit) (configure: WebApplication -> unit) =
+  runWith None spec announce setup configure

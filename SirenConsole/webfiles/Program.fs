@@ -12,6 +12,8 @@ open Mecaviv.Infrastructure.Web
 /// pupitres, the pieces and their playback.
 /// SIRENCONSOLE_PORT and SIRENCONSOLE_PRESETS override the port and presets.json (tests);
 /// SIRENCONSOLE_PREROLL_MS the sound's delay behind the score (M645.pd's [pipelist 5000]).
+/// HTTPS and WSS unless USE_HTTPS=false, with ssl/cert.pem and ssl/key.pem (SSL_CERT_PATH,
+/// SSL_KEY_PATH), as server.js.
 
 [<EntryPoint>]
 let main _ =
@@ -32,6 +34,29 @@ let main _ =
     | Error e ->
       error $"config: {e}; no pupitre configured"
       []
+
+  let tls =
+    if Environment.GetEnvironmentVariable "USE_HTTPS" = "false" then
+      None
+    else
+      let path name fallback =
+        match Environment.GetEnvironmentVariable name with
+        | null
+        | "" -> Path.Combine(root, "ssl", fallback)
+        | p -> p
+
+      let cert, key = path "SSL_CERT_PATH" "cert.pem", path "SSL_KEY_PATH" "key.pem"
+
+      if not (File.Exists cert && File.Exists key) then
+        eprintfn $"SSL certificates not found: {cert}, {key}. Create them with"
+
+        eprintfn
+          "  openssl req -x509 -newkey rsa:4096 -keyout ssl/key.pem -out ssl/cert.pem -days 365 -nodes -subj \"/CN=localhost\""
+
+        eprintfn "or start with USE_HTTPS=false."
+        exit 1
+
+      Some { CertificatePem = cert; KeyPem = key }
 
   let compositions =
     Midi.compositionsDir (Path.GetFullPath(Path.Combine(root, "..", "..")))
@@ -135,14 +160,16 @@ let main _ =
     UiSocket.install hub sync status app
     app.UseGiraffe(Api.webApp deps)
 
-  run
+  runWith
+    tls
     {
       LogLevel = "Debug"
       Ports = [ port ]
       MaxRequestBodyBytes = 50L * 1024L * 1024L
     }
     (fun () ->
-      info $"SirenConsole listening on http://0.0.0.0:{port}/ ({root})"
+      let scheme = if tls.IsSome then "https" else "http"
+      info $"SirenConsole listening on {scheme}://0.0.0.0:{port}/ ({root})"
       info $"presets: {presetsFile}"
       info $"config: {configFile}, {pupitres.Length} pupitre(s)"
       info $"compositions: {compositions}; sound {prerollMs} ms behind the score"
