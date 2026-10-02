@@ -82,6 +82,51 @@ void SshController::executeCommand(int machineType, const QString &command, cons
     });
 }
 
+void SshController::executeBatch(const QString &itemsJson, const QString &requestId)
+{
+    QJsonArray items;
+    for (const QJsonValue &v : QJsonDocument::fromJson(itemsJson.toUtf8()).array()) {
+        const QJsonObject o = v.toObject();
+        QJsonObject item;
+        item[QStringLiteral("machineType")] = machineTypeToString(o.value(QStringLiteral("machineType")).toInt());
+        item[QStringLiteral("command")] = o.value(QStringLiteral("command")).toString();
+        items.append(item);
+    }
+    QJsonObject body;
+    body[QStringLiteral("items")] = items;
+    QByteArray json = QJsonDocument(body).toJson(QJsonDocument::Compact);
+
+    postJson(QStringLiteral("/api/ssh/batch"), json, [this, requestId](QNetworkReply *reply) {
+        QJsonObject obj = readReplyBody(reply);
+        bool success = obj.value(QStringLiteral("success")).toBool();
+        QString results = QString::fromUtf8(QJsonDocument(obj.value(QStringLiteral("results")).toArray()).toJson(QJsonDocument::Compact));
+        QString errorStr = obj.value(QStringLiteral("error")).toString();
+        if (errorStr.isEmpty() && reply->error() != QNetworkReply::NoError) {
+            errorStr = reply->errorString();
+        }
+        emit batchFinished(requestId, success, results, errorStr);
+    });
+}
+
+void SshController::callBackend(const QString &path, const QString &bodyJson, const QString &requestId)
+{
+    QJsonObject body = QJsonDocument::fromJson(bodyJson.toUtf8()).object();
+    const QJsonValue mt = body.value(QStringLiteral("machineType"));
+    if (mt.isDouble())
+        body[QStringLiteral("machineType")] = machineTypeToString(mt.toInt());
+    QByteArray json = QJsonDocument(body).toJson(QJsonDocument::Compact);
+
+    postJson(path, json, [this, requestId](QNetworkReply *reply) {
+        QJsonObject obj = readReplyBody(reply);
+        bool success = obj.value(QStringLiteral("success")).toBool();
+        QString errorStr = obj.value(QStringLiteral("error")).toString();
+        if (errorStr.isEmpty() && reply->error() != QNetworkReply::NoError) {
+            errorStr = reply->errorString();
+        }
+        emit backendReply(requestId, success, QString::fromUtf8(QJsonDocument(obj).toJson(QJsonDocument::Compact)), errorStr);
+    });
+}
+
 void SshController::downloadFile(int machineType, const QString &remotePath, const QString &requestId)
 {
     QJsonObject body;

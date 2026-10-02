@@ -1,5 +1,6 @@
 module SirenManager.Backend.Program
 
+open System
 open System.Threading.Tasks
 open Giraffe
 open Microsoft.AspNetCore.Builder
@@ -9,7 +10,21 @@ open Mecaviv.Infrastructure.Logging
 open Mecaviv.Infrastructure.Web
 
 let cfg = Config.load ()
+MidiCache.load ()
 let hub = UdpRelay.Hub cfg.UdpPort
+
+/// One mailbox for every ssh `execute`: serialised per machine, timed, throttled.
+let scheduler =
+  Scheduler.start Scheduler.defaultPolicy (fun quiet machine command deadline ->
+    task {
+      try
+        let! out = SshProxy.executeCt deadline quiet cfg machine command
+        return Ok out
+      with
+      | SshProxy.SshError msg -> return Error msg
+      | :? OperationCanceledException -> return Error "cancelled"
+      | ex -> return Error ex.Message
+    })
 
 /// HTTP stays on ports.http. WebSocket stays on ports.websocket, which is what
 /// UdpController opens (ws://localhost:8006/udp-proxy). The path is not checked.
@@ -33,7 +48,7 @@ let configureApp (app: WebApplication) =
     .Use(requestLog)
     .Use(cors)
     .Use(socketGate)
-    .UseGiraffe(Api.webApp cfg)
+    .UseGiraffe(Api.webApp cfg scheduler)
   |> ignore
 
 [<EntryPoint>]

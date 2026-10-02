@@ -92,3 +92,68 @@ SystemMaintenance, PlaylistComposer, sirènes S1–S7 + Maître + Pi5).
 - [ ] Vue Voitures : envoi UDP réel vers `voitureA` / `voitureB` ("pchits")
 - [ ] Workflow MIDI swap voitures (cf. memory `reference_midi_swap_workflow`)
 
+
+## Onglet SYSTÈME : décisions et limites connues (2026-10-02)
+
+### Reboot
+- Le compte `guest` des Artila **ne peut pas** lancer `reboot` (BusyBox 1.00 : « You have no permission
+  to run this applet! ») : les boutons Reboot / Reboot all échouaient. `root@carte` fonctionne.
+- Correctif (backend, `SshProxy.rebootAsRoot`) : `/api/ssh/execute` lance **exactement** la commande
+  `reboot` en root (`ssh -l root <alias>`, mêmes clés et réglages que `~/.ssh/config`), sur sa propre
+  connexion (pas de connexion partagée gardée ouverte pour root). Rien d'autre n'est lancé en root.
+  Le QML n'a pas changé. À valider sur la carte (la coupure de la liaison pendant le reboot = succès).
+
+### Cartes sans réponse (partage NFS du banc de dev)
+- Sur le banc, la Maître monte le partage NFS du Mac. Quand il bloque, `df` et la lecture de
+  `/proc/mounts` ne reviennent plus, puis sshd ne répond plus (ping ok, bannière en timeout).
+  La production n'a pas de montage NFS.
+- Une seule requête à la fois par carte : sans échéance, une requête bloquée gèlerait l'onglet.
+  Chaque type de requête a donc une échéance (`Scheduler.defaultPolicy.TimeoutMs`) : 10 s pour
+  meminfo + df, 15 s pour les suivis, 25 s pour disque/listes, 60 s pour le reste.
+  Après l'échéance : erreur « timeout » et la file continue. Le processus bloqué reste sur la carte
+  (impossible à tuer d'ici) : il faut réparer le montage ou redémarrer.
+
+### Lecture des fichiers MIDI
+- Les infos (durée, tempo, canaux, notes, découpe `midi-split`) sont lues **sur la carte** par
+  `midi-info-board` (firmwares-artila/tools/midi-split-board), priorité minimale, 1 s de pause par
+  fichier, posé dans `/tmp` de la carte à la demande (disparaît au reboot). Résultats mis en cache
+  (taille + mtime). La Raspberry Pi lit par ssh (lecture espacée) et analyse côté serveur.
+- Les listes « MIDI distants » comparent chaque machine à la Maître (somme de contrôle, canal attendu
+  pour S1–S7), et signalent les fichiers que le lecteur C de production ne charge pas.
+
+### Morceau en cours
+- La Maître envoie `RU` (lecture, numéro de slot) au démarrage/arrêt d'un morceau et `TI` (temps écoulé) ;
+  `UdpManager` les analyse déjà (onglet Player). L'onglet SYSTÈME marque le slot dans la playlist
+  active quand la machine affichée est la Maître. À valider avec un morceau réellement lancé.
+- Limites : seule la Maître envoie ces trames ; le numéro est celui de sa playlist active
+  (`derniere_liste`) ; il faut que l'application soit enregistrée comme interface côté Maître (le
+  bouton « synchro » du Player le fait ; l'onglet SYSTÈME envoie aussi `sendAskSynchro` à l'affichage).
+
+### Simulation de bout en bout (banc de dev)
+Chaîne : **SirenManager (Player) → carte de dev avec `m_seq_sim.ko` → tap UDP 9000 → `tap-viewer midi` →
+source MIDI virtuelle `m_seq_sim` → ComposeSiren**. La carte joue les morceaux de ses playlists avec le vrai
+code du séquenceur (tous les canaux 1-7) ; l'application envoie les commandes V1 habituelles.
+- Bouton **Simulation** (barre du haut de l'onglet SYSTÈME, un ● quand elle tourne) : ouvre une **fenêtre** non modale
+  (déplaçable, on peut continuer à utiliser le Player) : état de la carte (module, maître), du tap, du DSP, ligne de
+  progression de tap-viewer ; *Démarrer* / *Arrêter et restaurer la carte* / *Aller au Player*. Section *Dépannage*
+  avec des commandes **copiables** (macOS/Linux, PowerShell, cmd) : relancer le backend avec `SIREN_ALLOW_SIM=1`,
+  construire ou localiser tap-viewer (`SIREN_TAP_VIEWER`), sortie MIDI sans source virtuelle (`SIREN_TAP_PORT`, Windows :
+  port loopMIDI), remettre la carte (`tap-viewer sim down ADRESSE`). Un tap-viewer resté d'un backend redémarré est
+  détecté et fermé par *Arrêter* / *Démarrer*.
+- Le backend ne fait que lancer `tap-viewer` : `tap-viewer sim up|down|status HOST` (échange du module,
+  firmwares-artila/tools/tap-viewer, sur main) et `tap-viewer midi 9000 --virtual m_seq_sim --channels 1-7`
+  (écoute, gardé comme processus fils). Aucune logique d'échange de module n'est dupliquée côté F#.
+- Refusé sauf si le backend est lancé avec **`SIREN_ALLOW_SIM=1`** (l'application sert aussi en production,
+  seule la carte de dev doit être échangée). Le binaire est trouvé via `SIREN_TAP_VIEWER` ou le checkout
+  `firmwares-artila` (`franz run tap-viewer -- midi --list` le construit).
+  Ex. : `SIREN_ALLOW_SIM=1 dotnet watch --non-interactive --project SirenManager/backend/fsharpwebserver`.
+- Testé : aller-retour `up`/`down` (idempotent) sur la carte, démarrage/arrêt par le backend, ComposeSiren
+  branché automatiquement sur la source. Pas encore testé avec un morceau lancé depuis le Player.
+- À construire ensuite (idées) : scénarios de charge pilotés depuis l'application (enchaîner toute une playlist,
+  stop/reset rapides, charger des playlists alternées) avec verdict (retards de tap-viewer, `dmesg` sans oops,
+  longueurs jouées = longueurs du fichier), et un « morceau en cours » alimenté par la simulation.
+
+### À faire
+- [ ] Valider Reboot en root sur une carte (le banc vient d'être redémarré à la main).
+- [ ] Lecture de `df` sans passer par `/proc/mounts` si possible, ou le retirer du suivi automatique.
+- [ ] Marquer aussi le morceau en cours sur les sirènes (leurs fichiers sont des découpes du même slot).
