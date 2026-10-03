@@ -12,3 +12,6 @@ nuget UnMango.CliWrap.FSharp
 nuget Thoth.Json.Core
 nuget Thoth.Json.Newtonsoft
 nuget Expecto
+# SirenePupitre/webfiles/simulateur-fable (compiled by Fable)
+nuget Fable.Core
+nuget Fable.Browser.Dom

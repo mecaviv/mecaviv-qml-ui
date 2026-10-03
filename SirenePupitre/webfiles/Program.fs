@@ -14,6 +14,9 @@ open Mecaviv.Infrastructure.Web
 let main argv =
   let root = contentRoot "server.js"
 
+  // simulateur.html loads simulateur-fable/App.js (Fable); build it when missing.
+  ensureFable root "simulateur-fable" |> ignore
+
   let simulation =
     Array.contains "--simulation" argv
     || Environment.GetEnvironmentVariable "SIRENEPUPITRE_SIMULATION" = "1"

@@ -113,6 +113,56 @@ let envPort name fallback =
     | true, port -> port
     | _ -> fallback
 
+/// Run a tool from the monorepo root (two levels above `webfiles`).
+let private runInRepoRoot (fileName: string) (args: string) =
+  let root = Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "..", ".."))
+  let root =
+    if File.Exists(Path.Combine(root, "paket.dependencies")) then root
+    else Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."))
+
+  let psi =
+    ProcessStartInfo(
+      FileName = fileName,
+      Arguments = args,
+      WorkingDirectory = root,
+      RedirectStandardOutput = true,
+      RedirectStandardError = true,
+      UseShellExecute = false)
+
+  use proc = Process.Start psi
+  let stdout = proc.StandardOutput.ReadToEnd()
+  let stderr = proc.StandardError.ReadToEnd()
+  proc.WaitForExit()
+
+  if proc.ExitCode <> 0 then
+    failwith $"{fileName} {args} exited {proc.ExitCode}\n{stdout}\n{stderr}"
+
+  stdout
+
+/// Compile a Fable project under `webfiles/<name>` when its `App.js` is
+/// missing or older than any `.fs` source (the simulateur page, etc.).
+let ensureFable (webfiles: string) (name: string) =
+  let dir = Path.Combine(webfiles, name)
+  let outFile = Path.Combine(dir, "App.js")
+  let sources =
+    if Directory.Exists dir then Directory.GetFiles(dir, "*.fs") else [||]
+
+  if sources.Length = 0 then
+    false
+  else
+    let stale =
+      not (File.Exists outFile)
+      || sources
+         |> Array.exists (fun f -> File.GetLastWriteTimeUtc f > File.GetLastWriteTimeUtc outFile)
+
+    if not stale then
+      false
+    else
+      info $"fable: building {name} (App.js missing or older than the F# sources)"
+      runInRepoRoot "dotnet" "tool restore" |> ignore
+      runInRepoRoot "dotnet" $"fable SirenePupitre/webfiles/{name} -o SirenePupitre/webfiles" |> ignore
+      true
+
 /// Like useStaticSite, with the application's own routes (`api`) placed after the log and
 /// CORS, and before the 501 of the routes still served by Node: a route ported to F# takes
 /// over, the others keep answering "port-in-progress".

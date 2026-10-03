@@ -113,3 +113,7 @@ fp-info-cache
 # SirenConsole : fichiers de travail du serveur de presets (écriture atomique, sauvegarde d’un fichier illisible)
 SirenConsole/webfiles/presets.json.tmp
 SirenConsole/webfiles/presets.json.corrupted-*
+
+# Fable output (dotnet fable / scripts/build.sh / the F# web server)
+SirenePupitre/webfiles/fable_modules/
+SirenePupitre/webfiles/simulateur-fable/*.js
