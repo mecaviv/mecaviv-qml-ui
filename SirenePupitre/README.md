@@ -1387,6 +1387,8 @@ joystick (qui revient au centre), le slider et la pédale, le choix de la sirèn
 contexte, la partition, et le tableau des fonctions (joueur / partition, sources du mapping).
 Elle montre l'état de Pd (ses annonces) et la voix (le tap `simulation voix …`). En haut : le son
 (`config synthese`, `simulation son`) et le volume en dB de Pd (`config volume`, 100 = gain 1).
+Les pièces se choisissent dans la liste du dépôt `compositions` (`GET /simulation/fichiers`, le
+dépôt cloné à côté de mecaviv-qml-ui, ou `SIRENEPUPITRE_COMPOSITIONS`), par dossier, avec un filtre.
 
 Le serveur (`webfiles/Simulation.fs`) relaie le WebSocket `/simulation` vers le port FUDI de Pd
 (`SIRENEPUPITRE_PD_FUDI`, 9100) : une trame = un message, pris dans le vocabulaire du contrat du

@@ -43,6 +43,30 @@ let checkMessage (text: string) =
     else
       Error $"'{first}' is not a pupitre message"
 
+/// The MIDI files of the compositions repository: paths relative to it, with `/`, sorted.
+let midiFiles (dir: string) =
+  if not (IO.Directory.Exists dir) then
+    []
+  else
+    IO.Directory.EnumerateFiles(dir, "*", IO.SearchOption.AllDirectories)
+    |> Seq.filter (fun f ->
+      let e = IO.Path.GetExtension(f).ToLowerInvariant()
+      e = ".mid" || e = ".midi")
+    |> Seq.map (fun f -> IO.Path.GetRelativePath(dir, f).Replace('\\', '/'))
+    |> Seq.filter (fun p -> not (p.StartsWith ".git/"))
+    |> Seq.sortWith (fun a b -> String.Compare(a, b, StringComparison.OrdinalIgnoreCase))
+    |> List.ofSeq
+
+/// `fichier charger <path>` for Pd: the path's spaces escaped, so that it stays one atom
+/// (the page may not send a backslash itself).
+let forPd (m: string) =
+  let prefix = "fichier charger "
+
+  if m.StartsWith prefix then
+    prefix + m.Substring(prefix.Length).Replace(" ", "\\ ")
+  else
+    m
+
 /// The complete messages of a FUDI stream (each ends with an unescaped `;`), and the rest.
 let splitFudi (text: string) =
   let messages = ResizeArray<string>()
@@ -110,7 +134,7 @@ let private fromPd (stream: NetworkStream) (socket: WebSocket) (gate: SemaphoreS
         rest <- r
 
         for m in messages do
-          do! send socket gate m
+          do! send socket gate (m.Replace("\\ ", " ")) // Pd escapes the spaces of a symbol
   }
 
 /// Page → Pd, until the page closes.
@@ -132,7 +156,7 @@ let private toPd (stream: NetworkStream) (socket: WebSocket) (gate: SemaphoreSli
         open' <- false
       else
         match checkMessage text with
-        | Ok m -> do! write m
+        | Ok m -> do! write (forPd m)
         | Error why -> do! send socket gate $"refus simulateur {why}"
   }
 
@@ -167,9 +191,20 @@ let private serve (pdHost: string) (pdPort: int) (socket: WebSocket) =
       info "/simulation: the page left"
   }
 
-/// Accepts /simulation (WebSocket) and relays it to Pd's FUDI port.
-let install (pdHost: string) (pdPort: int) (app: WebApplication) =
+/// Accepts /simulation (WebSocket) and relays it to Pd's FUDI port; GET /simulation/fichiers
+/// lists the MIDI files of the compositions repository (`compositions`), as gyrophone resolves
+/// `fichier charger` paths against the same repository.
+let install (pdHost: string) (pdPort: int) (compositions: string) (app: WebApplication) =
   app.UseWebSockets() |> ignore
+
+  app.Use(fun (ctx: HttpContext) (next: RequestDelegate) ->
+    if ctx.Request.Path.Value = "/simulation/fichiers" && HttpMethods.IsGet ctx.Request.Method then
+      ctx.Response.ContentType <- "application/json; charset=utf-8"
+      let body = Text.Json.JsonSerializer.Serialize({| dossier = compositions; fichiers = midiFiles compositions |})
+      ctx.Response.WriteAsync body
+    else
+      next.Invoke ctx)
+  |> ignore
 
   app.Use(fun (ctx: HttpContext) (next: RequestDelegate) ->
     if ctx.Request.Path.Value = "/simulation" && ctx.WebSockets.IsWebSocketRequest then

@@ -79,6 +79,13 @@
   td select { width: 100%; padding: 3px 6px; }
   .barre { height: 8px; background: var(--metal); border-radius: 4px; overflow: hidden; }
   .barre i { display: block; height: 100%; width: 0; background: var(--accent); }
+  .fichiers { max-height: 260px; overflow: auto; border: 1px solid var(--trait); border-radius: 8px; padding: 4px; background: var(--metal); }
+  .fichiers details { margin: 2px 0; }
+  .fichiers summary { cursor: pointer; padding: 3px 6px; font-weight: 650; color: var(--doux); }
+  .fichiers button { display: block; width: 100%; text-align: left; border: 0; border-radius: 6px; background: transparent;
+                     padding: 3px 8px 3px 20px; overflow-wrap: anywhere; }
+  .fichiers button:hover { background: var(--accent-doux); }
+  .fichiers button.charge { background: var(--accent); color: #fff; }
   #journal { font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; height: 180px; overflow: auto;
              background: var(--metal); border-radius: 8px; padding: 8px; white-space: pre-wrap; color: var(--doux); }
   #journal .refus { color: var(--alerte); }
@@ -226,9 +233,10 @@
     <h2>Partition</h2>
     <div class="pile">
       <div class="ligne">
-        <input type="text" id="fichier" value="gyrophones/microtonal/midi/assemblyPoint.midi" aria-label="fichier">
-        <button id="charger">Charger</button>
+        <input type="text" id="filtre" placeholder="filtrer les pièces…" aria-label="filtrer">
+        <span class="valeur" id="nb-fichiers"></span>
       </div>
+      <div class="fichiers" id="fichiers"></div>
       <div class="ligne">
         <button data-transport="lecture">Lecture</button>
         <button data-transport="pause">Pause</button>
@@ -312,7 +320,7 @@ function recevoir(message) {
     case "transport":
       $("e-transport").textContent = m[2] === "position" ? (etatTransport + " · tick " + m[3]) : (etatTransport = m[2]);
       break;
-    case "fichier": $("e-fichier").textContent = m.slice(2).join(" "); break;
+    case "fichier": fichierCharge = m.slice(2).join(" "); $("e-fichier").textContent = fichierCharge; dessinerFichiers(); break;
     case "edition.mapping": $("e-edition").textContent = m.slice(3).join(" ") + "  (" + m[2] + ")"; break;
     case "autonomie": { const s = document.querySelector(`select[data-autonomie="${m[2]}"]`); if (s) s.value = m[3]; break; }
     case "mapping": {
@@ -492,7 +500,7 @@ $("pedale").addEventListener("input", (e) => geste("pedale " + e.target.value));
     b.onclick = () => envoyer("contexte " + c); box.appendChild(b);
   }
   document.querySelectorAll("[data-transport]").forEach(b => b.onclick = () => envoyer("transport " + b.dataset.transport));
-  $("charger").onclick = () => envoyer("fichier charger " + $("fichier").value.trim());
+  $("filtre").addEventListener("input", dessinerFichiers);
   $("anticipation").onchange = (e) => envoyer("config anticipation " + (e.target.value || 0));
   $("son").onchange = appliquerSon;
   $("volume").addEventListener("input", (e) => { $("volume-db").textContent = e.target.value + " dB"; envoyer("config volume " + e.target.value); });
@@ -543,6 +551,43 @@ dessinerMenu(-1);
     if (f) envoyer(`mapping ${f} ${document.querySelector(`select[data-source1="${f}"]`).value} ${document.querySelector(`select[data-source2="${f}"]`).value}`);
   });
 })();
+
+// ── pièces : la liste du dépôt compositions, par dossier ────────────────────────────────────
+let fichiers = [], fichierCharge = "";
+function urlFichiers() {
+  return (location.protocol.startsWith("http") ? "" : "http://localhost:8000") + "/simulation/fichiers";
+}
+async function chargerListe() {
+  try {
+    const r = await fetch(urlFichiers()); const j = await r.json();
+    fichiers = j.fichiers || [];
+    if (!fichiers.length) $("fichiers").textContent = "aucun fichier MIDI dans " + j.dossier;
+    else dessinerFichiers();
+  } catch (e) { $("fichiers").textContent = "liste indisponible (serveur ?)"; setTimeout(chargerListe, 3000); }
+}
+function dessinerFichiers() {
+  if (!fichiers.length) return;
+  const f = $("filtre").value.trim().toLowerCase();
+  const vus = fichiers.filter(p => !f || p.toLowerCase().includes(f));
+  $("nb-fichiers").textContent = vus.length + " / " + fichiers.length;
+  const groupes = new Map();
+  for (const p of vus) { const d = p.split("/")[0]; if (!groupes.has(d)) groupes.set(d, []); groupes.get(d).push(p); }
+  const boite = $("fichiers"); boite.innerHTML = "";
+  for (const [dossier, liste] of groupes) {
+    const det = document.createElement("details");
+    det.open = !!f || liste.includes(fichierCharge) || groupes.size === 1;
+    const sum = document.createElement("summary"); sum.textContent = dossier + "  (" + liste.length + ")"; det.appendChild(sum);
+    for (const p of liste) {
+      const b = document.createElement("button");
+      b.textContent = p.slice(dossier.length + 1); b.title = p;
+      if (p === fichierCharge) b.className = "charge";
+      b.onclick = () => envoyer("fichier charger " + p);
+      det.appendChild(b);
+    }
+    boite.appendChild(det);
+  }
+}
+chargerListe();
 
 connecter();
 </script>
