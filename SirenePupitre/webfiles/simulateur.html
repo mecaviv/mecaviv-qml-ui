@@ -58,6 +58,7 @@
          position: relative; touch-action: none; user-select: none; overflow: hidden; display: flex; align-items: flex-end; }
   .pad .niveau { position: absolute; left: 0; right: 0; bottom: 0; background: var(--accent); opacity: .85; height: 0; }
   .pad span { position: relative; padding: 8px; font-weight: 650; }
+  .pad.maintenu { border-color: var(--accent); border-style: dashed; }
   .joy { display: flex; gap: 14px; align-items: center; }
   .zone-joy { width: 140px; height: 140px; border-radius: 12px; background: var(--metal); border: 1px solid var(--trait);
               position: relative; touch-action: none; flex: none; }
@@ -143,10 +144,16 @@
   <section>
     <h2>Pads</h2>
     <div class="pads">
-      <div class="pad" id="pad1"><div class="niveau"></div><span>pad 1</span></div>
-      <div class="pad" id="pad2"><div class="niveau"></div><span>pad 2</span></div>
+      <div class="pile" style="flex:1;gap:6px">
+        <div class="pad" id="pad1"><div class="niveau"></div><span>pad 1</span></div>
+        <label class="ligne petit"><input type="checkbox" id="maintien1"> maintenir</label>
+      </div>
+      <div class="pile" style="flex:1;gap:6px">
+        <div class="pad" id="pad2"><div class="niveau"></div><span>pad 2</span></div>
+        <label class="ligne petit"><input type="checkbox" id="maintien2"> maintenir</label>
+      </div>
     </div>
-    <div class="valeur" style="margin-top:6px">appuyer : la hauteur du doigt donne la pression (stylet : sa pression)</div>
+    <div class="valeur" style="margin-top:6px">appuyer : la hauteur du doigt donne la pression (stylet : sa pression) ; « maintenir » garde la pression au relâchement, pour jouer le joystick, le slider ou la pédale</div>
   </section>
 
   <section>
@@ -406,8 +413,8 @@ addEventListener("keyup", (e) => { if (B[e.key]) B[e.key].relache(); });
 })();
 
 // ── pads : appui, pression, relâchement ─────────────────────────────────────────────────────
-function pad(el, n) {
-  let tenu = false, derniere = -1;
+function pad(el, n, maintien) {
+  let tenu = false, derniere = -1, enJeu = false;   // enJeu : appuyé, ou maintenu
   const niveau = el.querySelector(".niveau");
   const pression = (e) => {
     if (e.pointerType === "pen" && e.pressure > 0) return Math.max(1, Math.round(e.pressure * 127));
@@ -416,13 +423,20 @@ function pad(el, n) {
   };
   const montrer = (v) => { niveau.style.height = (v / 127 * 100) + "%"; };
   el.addEventListener("pointerdown", (e) => { el.setPointerCapture(e.pointerId); tenu = true;
-    derniere = pression(e); montrer(derniere); geste(`pad ${n} appui ${derniere}`); });
+    derniere = pression(e); montrer(derniere);
+    geste(enJeu ? `pad ${n} pression ${derniere}` : `pad ${n} appui ${derniere}`); enJeu = true; });
   el.addEventListener("pointermove", (e) => { if (!tenu) return; const v = pression(e);
     if (v !== derniere) { derniere = v; montrer(v); geste(`pad ${n} pression ${v}`); } });
-  const lacher = () => { if (!tenu) return; tenu = false; montrer(0); geste(`pad ${n} relache 0`); };
+  const relacher = () => { enJeu = false; derniere = -1; montrer(0); geste(`pad ${n} relache 0`); };
+  const lacher = () => { if (!tenu) return; tenu = false; if (!maintien.checked) relacher(); };
   el.addEventListener("pointerup", lacher); el.addEventListener("pointercancel", lacher);
+  el.classList.toggle("maintenu", maintien.checked);
+  maintien.addEventListener("change", () => {
+    el.classList.toggle("maintenu", maintien.checked);
+    if (!maintien.checked && enJeu && !tenu) relacher();
+  });
 }
-pad($("pad1"), 1); pad($("pad2"), 2);
+pad($("pad1"), 1, $("maintien1")); pad($("pad2"), 2, $("maintien2"));
 
 // ── joystick : revient au centre (64) au relâchement ────────────────────────────────────────
 (function () {
