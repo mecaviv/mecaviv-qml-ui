@@ -252,11 +252,11 @@ const SIRENES = [ // pupitre-sirens.csv : min jouable, max (catégorie + 12), ma
   [1, "S1 alto", 43, 86, 72], [2, "S2 alto", 43, 86, 72], [3, "S3 basse", 36, 77, 60],
   [4, "S4 ténor", 36, 79, 60], [5, "S5 soprano", 48, 94, 84], [6, "S6 soprano", 48, 94, 84],
   [7, "S7 piccolo", 48, 94, 84]];
-const FONCTIONS = ["velocite", "volet", "vibrato.profondeur", "vibrato.vitesse",
+const FONCTIONS = ["velocite", "vibrato.profondeur", "vibrato.vitesse",
                    "tremolo.profondeur", "tremolo.vitesse", "attaque", "relache"];
 const SOURCES = ["aucun", "pads", "slider", "pedale", "joystick.x", "joystick.y", "joystick.z"];
 const MENU = ["jeu.libre", "jeu.partition", "calibration", "mapping", "admin"];
-const CC_NOMS = {7: "volet", 1: "vibrato prof.", 9: "vibrato vit.", 92: "trémolo prof.",
+const CC_NOMS = {1: "vibrato prof.", 9: "vibrato vit.", 92: "trémolo prof.",
                  15: "trémolo vit.", 73: "attaque", 72: "relâchement", 5: "portamento", 121: "reset"};
 
 const $ = (id) => document.getElementById(id);
