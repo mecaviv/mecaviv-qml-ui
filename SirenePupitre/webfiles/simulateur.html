@@ -95,6 +95,7 @@
   <span id="etat-connexion">déconnecté</span>
   <div class="droite">
     <label class="ligne petit"><input type="checkbox" id="son" checked> son (synthèse + DSP)</label>
+    <label class="ligne petit">volume <input type="range" id="volume" min="0" max="127" value="100" style="width:110px"> <span id="volume-db" class="valeur">100 dB</span></label>
     <label class="ligne petit danger"><input type="checkbox" id="parc"> parc : sirènes physiques</label>
   </div>
 </header>
@@ -265,7 +266,7 @@ function connecter() {
   ws.onopen = () => {
     $("pastille").classList.add("ok"); $("etat-connexion").textContent = "connecté";
     journal("— connecté à " + urlServeur());
-    appliquerSon(); appliquerSirene(); envoyer("config anticipation " + ($("anticipation").value || 0));
+    appliquerSon(); appliquerSirene(); envoyer("config volume " + $("volume").value); envoyer("config anticipation " + ($("anticipation").value || 0));
     if ($("parc").checked) envoyer("config parc 1");
   };
   ws.onclose = () => {
@@ -463,6 +464,7 @@ $("pedale").addEventListener("input", (e) => geste("pedale " + e.target.value));
   $("charger").onclick = () => envoyer("fichier charger " + $("fichier").value.trim());
   $("anticipation").onchange = (e) => envoyer("config anticipation " + (e.target.value || 0));
   $("son").onchange = appliquerSon;
+  $("volume").addEventListener("input", (e) => { $("volume-db").textContent = e.target.value + " dB"; envoyer("config volume " + e.target.value); });
   $("parc").onchange = (e) => {
     if (e.target.checked && !confirmerParc()) { e.target.checked = false; return; }
     envoyer("config parc " + (e.target.checked ? 1 : 0));
@@ -477,7 +479,7 @@ function confirmerParc() {
 }
 function appliquerSon() {
   const on = $("son").checked ? 1 : 0;
-  envoyer("config synthese " + on); envoyer("simulation dsp " + on);
+  envoyer("config synthese " + on); envoyer("simulation son " + on);
 }
 function marquer(id, valeur) {
   $(id).querySelectorAll("button").forEach(b => b.classList.toggle("actif", b.dataset.valeur === valeur));

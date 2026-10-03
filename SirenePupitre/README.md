@@ -1385,7 +1385,8 @@ La page (`webfiles/simulateur.html`) a un volant qu'on tourne, les vitesses, B1 
 (les deux = reset ; touches 1 et 2), l'encodeur et son poussoir, les pads (pression), le
 joystick (qui revient au centre), le slider et la pédale, le choix de la sirène, le mode, le
 contexte, la partition, et le tableau des fonctions (joueur / partition, sources du mapping).
-Elle montre l'état de Pd (ses annonces) et la voix (le tap `simulation voix …`).
+Elle montre l'état de Pd (ses annonces) et la voix (le tap `simulation voix …`). En haut : le son
+(`config synthese`, `simulation son`) et le volume en dB de Pd (`config volume`, 100 = gain 1).
 
 Le serveur (`webfiles/Simulation.fs`) relaie le WebSocket `/simulation` vers le port FUDI de Pd
 (`SIRENEPUPITRE_PD_FUDI`, 9100) : une trame = un message, pris dans le vocabulaire du contrat du
