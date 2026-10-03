@@ -49,7 +49,7 @@
   .segments button { border: 0; border-radius: 0; border-right: 1px solid var(--trait); min-width: 38px; }
   .segments button:last-child { border-right: 0; }
   .grand { width: 84px; height: 64px; font-size: 18px; font-weight: 650; border-radius: 12px; }
-  .grand.presse { background: var(--accent); color: #fff; transform: translateY(1px); }
+  .grand.presse, #joy-bouton.presse { background: var(--accent); color: #fff; transform: translateY(1px); }
   svg.bouton-rond { touch-action: none; cursor: grab; display: block; }
   svg.bouton-rond:active { cursor: grabbing; }
   .valeur { font-variant-numeric: tabular-nums; color: var(--doux); font-size: 12px; }
@@ -124,10 +124,17 @@
     <div class="ligne" style="justify-content:space-between">
       <div class="pile">
         <div class="ligne">
-          <button class="grand" id="b1">B1</button>
-          <button class="grand" id="b2">B2</button>
+          <div class="pile" style="gap:4px;align-items:center">
+            <button class="grand" id="b1">B1</button>
+            <label class="ligne petit"><input type="checkbox" id="maintien-b1"> maintenir</label>
+          </div>
+          <div class="pile" style="gap:4px;align-items:center">
+            <button class="grand" id="b2">B2</button>
+            <label class="ligne petit"><input type="checkbox" id="maintien-b2"> maintenir</label>
+          </div>
+          <button id="reset" title="B1 et B2 ensemble, puis relâchés">reset</button>
         </div>
-        <div class="valeur">tenir les deux = reset · touches <kbd>1</kbd> <kbd>2</kbd></div>
+        <div class="valeur">reset = les deux tenus (maintenir l'un, presser l'autre) · touches <kbd>1</kbd> <kbd>2</kbd></div>
       </div>
       <div class="pile" style="align-items:center">
         <svg class="bouton-rond" id="encodeur" width="110" height="110" viewBox="-55 -55 110 110" aria-label="encodeur">
@@ -161,6 +168,10 @@
     <div class="joy">
       <div class="zone-joy" id="joy"><div class="manche" id="manche"></div></div>
       <div class="pile" style="flex:1">
+        <div class="ligne">
+          <button id="joy-bouton">bouton du joystick</button>
+          <label class="ligne petit"><input type="checkbox" id="maintien-joy"> maintenir</label>
+        </div>
         <label class="petit">rotation (z) <input type="range" id="joyz" min="0" max="127" value="64"></label>
         <label class="petit">slider <input type="range" id="slider" min="0" max="127" value="0"></label>
         <label class="petit">pédale <input type="range" id="pedale" min="0" max="127" value="0"></label>
@@ -373,14 +384,19 @@ function toast(t) {
 })();
 
 // ── boutons : appui et relâchement, comme la carte ─────────────────────────────────────────
-function boutonTenu(el, n) {
-  const presse = () => { if (el.classList.contains("presse")) return; el.classList.add("presse"); geste(`bouton ${n} 1`); };
-  const relache = () => { if (!el.classList.contains("presse")) return; el.classList.remove("presse"); geste(`bouton ${n} 0`); };
+// geste(appui) / geste(relache) ; « maintenir » garde le bouton enfoncé au relâchement
+function boutonTenu(el, appui, relacheGeste, maintien) {
+  const presse = () => { if (el.classList.contains("presse")) return; el.classList.add("presse"); geste(appui); };
+  const relache = () => { if (!el.classList.contains("presse")) return; el.classList.remove("presse"); geste(relacheGeste); };
+  const lacher = () => { if (!maintien || !maintien.checked) relache(); };
   el.addEventListener("pointerdown", (e) => { el.setPointerCapture(e.pointerId); presse(); });
-  el.addEventListener("pointerup", relache); el.addEventListener("pointercancel", relache);
-  return { presse, relache };
+  el.addEventListener("pointerup", lacher); el.addEventListener("pointercancel", lacher);
+  if (maintien) maintien.addEventListener("change", () => { if (!maintien.checked) relache(); });
+  return { presse, relache: lacher };
 }
-const B = { "1": boutonTenu($("b1"), 1), "2": boutonTenu($("b2"), 2) };
+const B = { "1": boutonTenu($("b1"), "bouton 1 1", "bouton 1 0", $("maintien-b1")),
+            "2": boutonTenu($("b2"), "bouton 2 1", "bouton 2 0", $("maintien-b2")) };
+$("reset").onclick = () => { for (const g of ["bouton 1 1", "bouton 2 1", "bouton 1 0", "bouton 2 0"]) geste(g); };
 addEventListener("keydown", (e) => { if (B[e.key] && !e.repeat && e.target.tagName !== "INPUT") B[e.key].presse(); });
 addEventListener("keyup", (e) => { if (B[e.key]) B[e.key].relache(); });
 
@@ -459,6 +475,7 @@ pad($("pad1"), 1, $("maintien1")); pad($("pad2"), 2, $("maintien2"));
   rz.addEventListener("input", () => { z = Number(rz.value); geste("joystick z " + z); montrer(); });
   rz.addEventListener("change", () => { rz.value = 64; z = 64; geste("joystick z 64"); montrer(); });
 })();
+boutonTenu($("joy-bouton"), "joystick bouton appui 100", "joystick bouton relache 0", $("maintien-joy"));
 $("slider").addEventListener("input", (e) => geste("slider " + e.target.value));
 $("pedale").addEventListener("input", (e) => geste("pedale " + e.target.value));
 
