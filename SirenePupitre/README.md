@@ -1368,3 +1368,31 @@ Loader {
   - `OldClef3D.mesh`, `TrebleKeyNew.mesh` (anciennes versions)
   - Sous-dossier `meshes/meshes/` (temporaire)
 - [ ] Supprimer les composants expérimentaux non utilisés (Clef2DPath si obsolète)
+
+## Simulateur (page web)
+
+Pour essayer `gyrophone.pd` (puredata-abstractions, branche `feat/pupitre-partition`) sans
+matériel, depuis un navigateur :
+
+```sh
+# 1. ouvrir application.layer/gyrophone.pd dans Pd (il écoute en FUDI sur 9100)
+# 2. le serveur du pupitre en mode simulation
+dotnet run --project SirenePupitre/webfiles -- --simulation      # ou SIRENEPUPITRE_SIMULATION=1
+# 3. http://localhost:8000/simulateur.html
+```
+
+La page (`webfiles/simulateur.html`) a un volant qu'on tourne, les vitesses, B1 et B2 tenus
+(les deux = reset ; touches 1 et 2), l'encodeur et son poussoir, les pads (pression), le
+joystick (qui revient au centre), le slider et la pédale, le choix de la sirène, le mode, le
+contexte, la partition, et le tableau des fonctions (joueur / partition, sources du mapping).
+Elle montre l'état de Pd (ses annonces) et la voix (le tap `simulation voix …`). En haut : le son
+(`config synthese`, `simulation son`) et le volume en dB de Pd (`config volume`, 100 = gain 1).
+Les pièces se choisissent dans la liste du dépôt `compositions` (`GET /simulation/fichiers`, le
+dépôt cloné à côté de mecaviv-qml-ui, ou `SIRENEPUPITRE_COMPOSITIONS`), par dossier, avec un filtre.
+
+Le serveur (`webfiles/Simulation.fs`) relaie le WebSocket `/simulation` vers le port FUDI de Pd
+(`SIRENEPUPITRE_PD_FUDI`, 9100) : une trame = un message, pris dans le vocabulaire du contrat du
+pupitre ; `;`, `,` et `\` sont refusés. Comme le tap-mode du firmware, la connexion ouvre le tap
+(`simulation actif 1`) et coupe le parc (`config parc 0` : rien ne part vers les sirènes
+physiques) ; la case « parc » de la page le rétablit, après confirmation.
+
