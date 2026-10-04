@@ -25,7 +25,11 @@ let fonctions =
      "tremolo.profondeur"
      "tremolo.vitesse"
      "attaque"
-     "relache" |]
+     "relache"
+     "bend" |]
+
+/// Fonctions sans autonomie (expression du joueur, ajoutée même quand la partition joue).
+let sansAutonomie = set [ "bend" ]
 
 let sources =
   [| "aucun"; "pads"; "pad1"; "pad2"; "slider"; "pedale"; "joystick.x"; "joystick.y"; "joystick.z" |]

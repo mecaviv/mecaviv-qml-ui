@@ -195,16 +195,18 @@ let private tableFonctions () =
     let col2 =
       if mappable then "<select data-source2=\"" + f + "\">" + options sources + "</select>" else ""
 
-    let auto = options [| "joueur"; "partition" |]
+    let auto =
+      if sansAutonomie.Contains f then
+        "joueur"
+      else
+        "<select data-autonomie=\"" + f + "\">" + options [| "joueur"; "partition" |] + "</select>"
 
     tr.innerHTML <-
       "<td>"
       + f
-      + "</td><td><select data-autonomie=\""
-      + f
-      + "\">"
+      + "</td><td>"
       + auto
-      + "</select></td><td>"
+      + "</td><td>"
       + col1
       + "</td><td>"
       + col2
