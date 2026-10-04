@@ -28,7 +28,7 @@ let fonctions =
      "relache" |]
 
 let sources =
-  [| "aucun"; "pads"; "slider"; "pedale"; "joystick.x"; "joystick.y"; "joystick.z" |]
+  [| "aucun"; "pads"; "pad1"; "pad2"; "slider"; "pedale"; "joystick.x"; "joystick.y"; "joystick.z" |]
 
 let menu =
   [| "jeu.libre"; "jeu.partition"; "calibration"; "mapping"; "admin" |]
