@@ -34,3 +34,5 @@ if(NOT EMSCRIPTEN)
     set_target_properties(qmlwebsocketserver PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/bin")
 endif()
+
+copy_to_webfiles(qmlwebsocketserver ${CMAKE_CURRENT_SOURCE_DIR}/../webfiles)

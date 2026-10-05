@@ -94,3 +94,4 @@ if(EMSCRIPTEN)
     )
 endif()
 
+copy_to_webfiles(appSirenManager ${CMAKE_CURRENT_SOURCE_DIR}/webfiles)
