@@ -32,7 +32,8 @@ let requestLog (ctx: HttpContext) (next: RequestDelegate) =
       task {
         try
           do! Task.Delay(1000, pending.Token)
-          info $"{method} {path} still running"
+          let note = yellow "still running"
+          info $"{httpMethod method} {path} {note}"
         with :? OperationCanceledException ->
           ()
       }
@@ -42,7 +43,7 @@ let requestLog (ctx: HttpContext) (next: RequestDelegate) =
     finally
       pending.Cancel()
       let ms = sw.ElapsedMilliseconds
-      info $"{method} {path} {ctx.Response.StatusCode} {ms}ms"
+      info $"{httpMethod method} {path} {status ctx.Response.StatusCode} {duration ms}"
   }
   :> Task
 

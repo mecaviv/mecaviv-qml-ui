@@ -1,0 +1,17 @@
+# key;text  (\n = line break)
+machine;Choisit la sirène à interroger.\nLes actions de cet onglet\ns’appliquent à cette machine.
+listPlaylists;Lit les playlists de la sirène\nsélectionnée et les fichiers\nMIDI de toutes les sirènes.
+exportKeys;Depuis CETTE machine de contrôle :\ncrée dans ~/Downloads une archive\nde la clé SSH des sirènes et des\nalias des 13 sirènes.\n\nÀ copier sur une AUTRE machine de\ncontrôle et à y installer avec\nINSTALL.sh : elle pourra alors\nse connecter aux sirènes.\n\nNe modifie ni cette machine,\nni les sirènes.\n⚠ Contient la clé privée (accès root).
+reboot;Redémarre la sirène\nsélectionnée (après\nconfirmation).
+rebootAll;Redémarre les 13 sirènes\n(après confirmation).
+refresh;Relit l’état système :\nCPU, mémoire, disque\net processus.
+trackCpu;Mesure la charge CPU en\ncontinu et la trace dans\nle graphique.
+diskDetail;Rafraîchit le détail du disque :\noccupation par dossier et\nplus gros fichiers.
+kernelThreads;Affiche aussi les threads\ndu noyau dans la liste\ndes processus.
+trackDmesg;Rafraîchit dmesg en continu\net suit les nouvelles lignes.
+refreshAll;Rafraîchit d’un coup :\nétat système, détail disque,\ndmesg et playlists.
+followAll;Active ou coupe le suivi continu\ndu CPU et de dmesg, la lecture\ndes processus et les processus noyau.
+pollProcs;Lit ou non la liste des processus\nà chaque suivi CPU. Désactivée,\nla carte ne lit plus /proc/<pid> :\nmoins de charge.
+dmesgFilter;Tout : le journal noyau complet.\nErreurs : seulement les lignes qui\nparlent d’erreur, d’échec ou d’alerte\n(filtrées ici, pas sur la carte).
+dmesgRefresh;Relit dmesg sur la carte\n(les 100 dernières lignes).
+simulation;Simulation : la carte de dev joue\nles morceaux (m_seq_sim), tap-viewer\nenvoie le tap à ComposeSiren.\nDémarre ou arrête la chaîne.

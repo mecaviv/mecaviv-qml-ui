@@ -84,14 +84,313 @@ let catch (ctx: HttpContext) work =
       return! writeJson ctx 500 (fail ex.Message)
   }
 
-let execute cfg =
+/// Every `execute` goes through the scheduler: one request at a time per
+/// machine, timed, counted, and polls held back when the board is struggling.
+let execute cfg (sched: Scheduler.Scheduler) =
   fun _ ctx ->
     catch ctx (fun () ->
       task {
         let! root = readRoot ctx
-        let! output = SshProxy.execute cfg (str root "machineType") (str root "command")
-        return! writeJson ctx 200 (ok [ "output", jstr output ])
+
+        // The Reboot buttons send exactly "reboot": that one is run as root (see SshProxy.rebootAsRoot).
+        if (str root "command").Trim() = "reboot" then
+          let machine = str root "machineType"
+          info $"reboot {machine} (as root)"
+          do! SshProxy.rebootAsRoot cfg machine
+          return! writeJson ctx 200 (ok [ "output", jstr "" ])
+        else
+        let! outcome = sched.Submit (str root "machineType") (Protocol.Raw(str root "command"))
+
+        match outcome with
+        | Scheduler.Output output -> return! writeJson ctx 200 (ok [ "output", jstr output ])
+        | Scheduler.Failed msg ->
+          error $"SSH error: {msg}"
+          return! writeJson ctx 500 (fail msg)
+        | Scheduler.Unreachable msg -> return! writeJson ctx 500 (fail msg)
+        | Scheduler.Throttled retryMs ->
+          return!
+            writeJson ctx 429 (node [ "success", jbool false; "error", jstr "throttled"; "throttled", jbool true; "retryAfterMs", jint retryMs ])
       })
+
+/// {items:[{machineType, command}, ...]}: runs them all (machines in parallel, each
+/// serialised by the scheduler) and answers once, with one result per item. Failures
+/// are summarised in a single log line instead of one error per board.
+let batch (sched: Scheduler.Scheduler) =
+  fun _ ctx ->
+    catch ctx (fun () ->
+      task {
+        let! root = readRoot ctx
+
+        let items =
+          match tryProp root "items" with
+          | Some v when v.ValueKind = JsonValueKind.Array ->
+            [ for t in v.EnumerateArray() -> str t "machineType", str t "command" ]
+          | _ -> []
+
+        let sw = System.Diagnostics.Stopwatch.StartNew()
+
+        let! outcomes =
+          items
+          |> List.map (fun (machine, cmd) ->
+            task {
+              let! o = sched.SubmitQuiet machine (Protocol.Raw cmd)
+              return machine, o
+            })
+          |> Task.WhenAll
+
+        let results = JsonArray()
+        let okNames = ResizeArray<string>()
+        let down = ResizeArray<string>()
+        let failed = ResizeArray<string * string>()
+
+        for machine, outcome in outcomes do
+          let unreachable msg =
+            down.Add machine
+            [ "success", jbool false; "unreachable", jbool true; "error", jstr msg ]
+
+          let pairs =
+            match outcome with
+            | Scheduler.Output out ->
+              okNames.Add machine
+              [ "success", jbool true; "output", jstr out ]
+            | Scheduler.Unreachable msg -> unreachable msg
+            | Scheduler.Failed msg when Scheduler.isUnreachable msg -> unreachable msg
+            | Scheduler.Failed msg ->
+              failed.Add((machine, msg))
+              [ "success", jbool false; "error", jstr msg ]
+            | Scheduler.Throttled ms ->
+              failed.Add((machine, "throttled"))
+              [ "success", jbool false; "error", jstr "throttled"; "retryAfterMs", jint ms ]
+
+          results.Add(node (("machineType", jstr machine) :: pairs))
+
+        let total = items.Length
+        let took = duration sw.ElapsedMilliseconds
+        let okCount = green (string okNames.Count)
+        let downList = String.Join(", ", down)
+        let downText = if down.Count > 0 then "  " + red ("✗ unreachable: " + downList) else ""
+
+        let failList =
+          failed |> Seq.map (fun (m, e) -> m + ": " + e.Split('\n')[0]) |> String.concat "; "
+
+        let failText = if failed.Count > 0 then "  " + yellow failList else ""
+        let line = $"batch {okCount}/{total} ok{downText}{failText}  {took}"
+        if down.Count + failed.Count > 0 then warn line else info line
+        return! writeJson ctx 200 (ok [ "results", (results :> JsonNode) ])
+      })
+
+/// {machineType, dir, files:[names]} -> one `ls -le` of the folder: each file's size
+/// and mtime, the readings that are still fresh in the cache, and the files that have
+/// to be read (`missing`). The UI shows the fresh ones at once and asks for the rest
+/// one file at a time (/api/midi/info).
+let midiStat cfg =
+  fun _ ctx ->
+    catch ctx (fun () ->
+      task {
+        let! root = readRoot ctx
+        let machine = str root "machineType"
+        let dir = str root "dir"
+
+        let wanted =
+          match tryProp root "files" with
+          | Some v when v.ValueKind = JsonValueKind.Array -> [ for f in v.EnumerateArray() -> f.GetString() ]
+          | _ -> []
+
+        let sw = System.Diagnostics.Stopwatch.StartNew()
+        let! text = SshProxy.executeQuiet cfg machine (Midi.statCommand dir)
+        let stats = Midi.parseStat text
+        let statsJson, cached, missing, gone = JsonObject(), JsonObject(), JsonArray(), JsonArray()
+
+        for name in wanted do
+          match Map.tryFind name stats with
+          | None -> gone.Add(jstr name)
+          | Some st ->
+            statsJson[name] <- node [ "size", JsonValue.Create st.Size; "mtime", jstr st.Mtime ]
+
+            match MidiCache.tryFresh machine name st with
+            | Some e -> cached[name] <- MidiCache.infoToJson e.Info
+            | None -> missing.Add(jstr name)
+
+        let took = duration sw.ElapsedMilliseconds
+        let fresh = cached.Count
+        let toRead = missing.Count
+        info $"midi stat {machine}: {wanted.Length} files, {green (string fresh)} cached, {yellow (string toRead)} to read, {gone.Count} absent  {took}"
+
+        return!
+          writeJson
+            ctx
+            200
+            (ok [ "stats", (statsJson :> JsonNode)
+                  "cached", (cached :> JsonNode)
+                  "missing", (missing :> JsonNode)
+                  "gone", (gone :> JsonNode) ])
+      })
+
+/// {machineType, dir, file[, chunkKb, pauseMs]} -> what the file says about itself
+/// (length, tempo, tracks, channels, notes). Served from the cache while `ls -le`
+/// still shows the size and mtime it was read at; otherwise read in chunks of
+/// steps of `chunkKb` (default 64) with `pauseMs` between them (default 150), so the board's
+/// CPU, which sshd's cipher saturates during a transfer, is shared with m_seq.
+let midiInfo cfg =
+  fun _ ctx ->
+    catch ctx (fun () ->
+      task {
+        let! root = readRoot ctx
+        let machine = str root "machineType"
+        let dir = (str root "dir").TrimEnd('/')
+        let name = str root "file"
+
+        let intOr key dflt =
+          match tryProp root key with
+          | Some v when v.ValueKind = JsonValueKind.Number -> v.GetInt32()
+          | _ -> dflt
+
+        let chunk = max 8 (intOr "chunkKb" 64) * 1024
+        let pause = max 0 (intOr "pauseMs" 150)
+        let sw = System.Diagnostics.Stopwatch.StartNew()
+
+        // One `ls -le` of the file itself: the freshness key.
+        let! statText = SshProxy.executeQuiet cfg machine ("ls -le " + SshProxy.shellQuote (dir + "/" + name))
+        let stat = statText |> Midi.parseStat |> Map.toList |> List.tryHead
+
+        let respond (st: Midi.FileStat) (entry: MidiCache.Entry) fromCache chunks =
+          let j = MidiCache.infoToJson entry.Info
+          j["size"] <- JsonValue.Create st.Size
+          j["mtime"] <- jstr st.Mtime
+          j["sha256"] <- jstr entry.Sha256
+          writeJson ctx 200 (ok [ "file", jstr name; "fromCache", jbool fromCache; "chunks", jint chunks; "info", (j :> JsonNode) ])
+
+        match stat with
+        | None -> return! writeJson ctx 200 (fail $"{name}: not found")
+        | Some(_, st) ->
+          match MidiCache.tryFresh machine name st with
+          | Some e ->
+            info $"midi {machine} {cyan name}: cache  {duration sw.ElapsedMilliseconds}"
+            return! respond st e true 0
+          | None ->
+            let! bytes, chunks = SshProxy.readPaced cfg machine (dir + "/" + name) chunk pause
+            if int64 bytes.Length <> st.Size then failwith $"{name}: read {bytes.Length} of {st.Size} bytes"
+
+            match Midi.parse bytes with
+            | Error e -> return! writeJson ctx 200 (fail $"{name}: {e}")
+            | Ok parsed ->
+              let entry: MidiCache.Entry = { Stat = st; Sha256 = Midi.sha256 bytes; Info = parsed }
+              MidiCache.put machine name entry
+              let kb = bytes.Length / 1024
+              info $"midi {machine} {cyan name}: read {kb} KB in {chunks} chunks  {duration sw.ElapsedMilliseconds}"
+              return! respond st entry false chunks
+      })
+
+/// {machineType, dir, files:[names][, pauseMs]} -> a background job reading what the files say
+/// about themselves (on the board when it can, see MidiScan). Answers at once with its id.
+let midiScan cfg =
+  fun _ ctx ->
+    catch ctx (fun () ->
+      task {
+        let! root = readRoot ctx
+
+        let files =
+          match tryProp root "files" with
+          | Some v when v.ValueKind = JsonValueKind.Array -> [ for f in v.EnumerateArray() -> f.GetString() ]
+          | _ -> []
+
+        let pause =
+          match tryProp root "pauseMs" with
+          | Some v when v.ValueKind = JsonValueKind.Number -> max 0 (v.GetInt32())
+          | _ -> 400
+
+        let job = MidiScan.start cfg (str root "machineType") (str root "dir") files pause
+        return! writeJson ctx 200 (ok [ "jobId", jstr job.Id; "via", jstr job.Via; "total", jint files.Length ])
+      })
+
+/// {jobId, from} -> the result lines from index `from`, the file being read, and whether it is over.
+let midiScanPoll =
+  fun _ ctx ->
+    task {
+      let! root = readRoot ctx
+      let from = match tryProp root "from" with | Some v when v.ValueKind = JsonValueKind.Number -> v.GetInt32() | _ -> 0
+
+      match MidiScan.tryJob (str root "jobId") with
+      | None -> return! writeJson ctx 200 (fail "unknown job")
+      | Some job ->
+        let arr = JsonArray()
+        for l in MidiScan.lines job from do arr.Add(l.DeepClone())
+
+        return!
+          writeJson
+            ctx
+            200
+            (ok [ "lines", (arr :> JsonNode)
+                  "current", jstr job.Current
+                  "done", jbool job.Done
+                  "error", jstr job.Error
+                  "via", jstr job.Via ])
+    }
+
+let midiScanCancel =
+  fun _ ctx ->
+    task {
+      let! root = readRoot ctx
+      MidiScan.tryJob (str root "jobId") |> Option.iter (fun j -> j.Cts.Cancel())
+      return! writeJson ctx 200 (ok [])
+    }
+
+/// The simulation chain (see Sim.fs): {machineType?} -> its state; start and stop swap the board's module.
+let private simMachine root = match str root "machineType" with | "" -> Sim.maitre | m -> m
+
+let simStatus cfg =
+  fun _ ctx ->
+    catch ctx (fun () ->
+      task {
+        let! root = readRoot ctx
+        let! st = Sim.status cfg (simMachine root)
+        return! writeJson ctx 200 (ok [ "sim", (st :> JsonNode) ])
+      })
+
+let simStart cfg =
+  fun _ ctx ->
+    catch ctx (fun () ->
+      task {
+        let! root = readRoot ctx
+        let! st = Sim.start cfg (simMachine root)
+        return! writeJson ctx 200 (ok [ "sim", (st :> JsonNode) ])
+      })
+
+let simStop cfg =
+  fun _ ctx ->
+    catch ctx (fun () ->
+      task {
+        let! root = readRoot ctx
+        let! st = Sim.stop cfg (simMachine root)
+        return! writeJson ctx 200 (ok [ "sim", (st :> JsonNode) ])
+      })
+
+/// Per (machine, kind) request counts, runtimes and throttling, plus the last CPU reading.
+let sshStats (sched: Scheduler.Scheduler) =
+  fun _ ctx ->
+    task {
+      let! rows = sched.Stats()
+      let arr = JsonArray()
+
+      for r in rows do
+        let s = r.Stats
+
+        arr.Add(
+          node
+            [ "machine", jstr r.Machine
+              "kind", jstr (Protocol.kindName r.Kind)
+              "count", jint s.Count
+              "errors", jint s.Errors
+              "throttled", jint s.Throttled
+              "avgMs", JsonValue.Create(if s.Count > 0 then s.TotalMs / float s.Count else 0.0)
+              "ewmaMs", JsonValue.Create s.EwmaMs
+              "maxMs", JsonValue.Create s.MaxMs
+              "lastMs", JsonValue.Create s.LastMs
+              "cpuBusyPct", (match r.BusyPct with Some p -> JsonValue.Create p | None -> null) ]
+        )
+
+      return! writeJson ctx 200 (ok [ "stats", (arr :> JsonNode) ])
+    }
 
 let download cfg =
   fun _ ctx ->
@@ -413,10 +712,20 @@ let exportKeys =
             return! writeJson ctx 200 (ok [ "path", jstr outPath; "aliasesFound", jint blocks.Length ])
       })
 
-let webApp cfg =
+let webApp cfg (sched: Scheduler.Scheduler) =
   choose
     [
-      POST >=> route "/api/ssh/execute" >=> execute cfg
+      POST >=> route "/api/ssh/execute" >=> execute cfg sched
+      POST >=> route "/api/ssh/batch" >=> batch sched
+      POST >=> route "/api/sim/status" >=> simStatus cfg
+      POST >=> route "/api/sim/start" >=> simStart cfg
+      POST >=> route "/api/sim/stop" >=> simStop cfg
+      POST >=> route "/api/midi/scan" >=> midiScan cfg
+      POST >=> route "/api/midi/scan/poll" >=> midiScanPoll
+      POST >=> route "/api/midi/scan/cancel" >=> midiScanCancel
+      POST >=> route "/api/midi/stat" >=> midiStat cfg
+      POST >=> route "/api/midi/info" >=> midiInfo cfg
+      GET >=> route "/api/ssh/stats" >=> sshStats sched
       POST >=> route "/api/ssh/download" >=> download cfg
       POST >=> route "/api/ssh/upload" >=> upload cfg
       POST >=> route "/api/ssh/sync-dir" >=> syncDir cfg

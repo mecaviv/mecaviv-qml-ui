@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtCore
 import SirenManager
 import "components"
 
@@ -10,6 +11,13 @@ ApplicationWindow {
     width: 1200
     height: 700
     title: "SirenManager - Contrôle des Sirènes Mecaviv"
+
+    // For the windows of the app that have to bring the user somewhere (the simulation dialog).
+    function showTab(index) { tabBar.currentIndex = index }
+
+    // Tooltips: keep the default translucent background, text in a soft orange
+    // (the default dark text was unreadable on the dark theme).
+    palette.toolTipText: "#f0a54a"
 
     // Background
     color: "#1e1e1e"
@@ -23,6 +31,21 @@ ApplicationWindow {
             id: tabBar
             Layout.fillWidth: true
             currentIndex: 0
+
+            // Reopen on the tab that was showing when the app was closed.
+            Settings {
+                id: appState
+                category: "MainWindow"
+                property int lastTab: 0
+            }
+            // The saved tab is applied once the tabs exist; nothing is saved before
+            // that, or the initial index would overwrite it.
+            property bool restored: false
+            Component.onCompleted: Qt.callLater(function() {
+                if (appState.lastTab >= 0 && appState.lastTab < count) currentIndex = appState.lastTab
+                restored = true
+            })
+            onCurrentIndexChanged: if (restored && currentIndex >= 0) appState.lastTab = currentIndex
             
             background: Rectangle {
                 color: "#2a2a2a"

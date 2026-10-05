@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtCore
 
 // A SplitView whose handles can be seen and found: a strip in a color of its own
 // (steel blue), with a grip, that turns orange under the mouse and brighter
@@ -12,6 +13,21 @@ SplitView {
     readonly property color handleHoverColor: "#ff9f1a"
     readonly property color handlePressedColor: "#ffc766"
     readonly property int handleThickness: 8
+
+    // Set a unique key to keep the pane sizes across restarts (stored in the
+    // app's QSettings, restored once the panes exist, saved when a drag ends).
+    property string stateKey: ""
+
+    Settings {
+        id: store
+        category: "SplitView_" + split.stateKey
+        property var state
+    }
+
+    Component.onCompleted: if (stateKey !== "") Qt.callLater(function() {
+        if (store.state) split.restoreState(store.state)
+    })
+    onResizingChanged: if (!resizing && stateKey !== "") store.state = split.saveState()
 
     handle: Rectangle {
         id: strip
