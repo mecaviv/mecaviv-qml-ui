@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Simulateur gyrophone</title>
+<link rel="stylesheet" href="simulateur.css">
+</head>
+<body>
+<header>
+  <span class="pastille" id="pastille"></span>
+  <h1>Simulateur gyrophone</h1>
+  <span id="etat-connexion">déconnecté</span>
+  <div class="droite">
+    <label class="ligne petit"><input type="checkbox" id="son" checked> son (synthèse + DSP)</label>
+    <label class="ligne petit">volume <input type="range" id="volume" min="0" max="127" value="100" style="width:110px"> <span id="volume-db" class="valeur">100 dB</span></label>
+    <label class="ligne petit danger"><input type="checkbox" id="parc"> parc : sirènes physiques</label>
+  </div>
+</header>
+
+<main>
+  <section>
+    <h2>Volant et vitesses</h2>
+    <div class="ligne" style="justify-content:space-between">
+      <svg class="bouton-rond" id="volant" width="170" height="170" viewBox="-85 -85 170 170" aria-label="volant">
+        <circle r="80" fill="var(--metal)" stroke="var(--trait)" stroke-width="2"/>
+        <circle r="62" fill="none" stroke="var(--trait)" stroke-width="10"/>
+        <g id="volant-aiguille"><line x1="0" y1="0" x2="0" y2="-70" stroke="var(--accent)" stroke-width="6" stroke-linecap="round"/></g>
+        <circle r="12" fill="var(--accent)"/>
+      </svg>
+      <div class="pile">
+        <div class="valeur" id="volant-valeur">0 tour</div>
+        <div class="segments" id="vitesses"></div>
+        <div class="valeur">vitesse 0 = point mort</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Boutons et encodeur</h2>
+    <div class="ligne" style="justify-content:space-between">
+      <div class="pile">
+        <div class="ligne">
+          <div class="pile" style="gap:4px;align-items:center">
+            <button class="grand" id="b1">B1</button>
+            <label class="ligne petit"><input type="checkbox" id="maintien-b1"> maintenir</label>
+          </div>
+          <div class="pile" style="gap:4px;align-items:center">
+            <button class="grand" id="b2">B2</button>
+            <label class="ligne petit"><input type="checkbox" id="maintien-b2"> maintenir</label>
+          </div>
+          <button id="reset" title="B1 et B2 ensemble, puis relâchés">reset</button>
+        </div>
+        <div class="valeur">reset = les deux tenus (maintenir l'un, presser l'autre) · touches <kbd>1</kbd> <kbd>2</kbd></div>
+      </div>
+      <div class="pile" style="align-items:center">
+        <svg class="bouton-rond" id="encodeur" width="110" height="110" viewBox="-55 -55 110 110" aria-label="encodeur">
+          <circle r="50" fill="var(--metal)" stroke="var(--trait)" stroke-width="2"/>
+          <g id="encodeur-crans"></g>
+          <g id="encodeur-aiguille"><line x1="0" y1="-20" x2="0" y2="-44" stroke="var(--accent)" stroke-width="5" stroke-linecap="round"/></g>
+          <circle r="18" id="poussoir" fill="var(--panneau)" stroke="var(--trait)" stroke-width="2" style="cursor:pointer"/>
+        </svg>
+        <div class="valeur">tourner (ou molette) · centre = poussoir</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Pads</h2>
+    <div class="pads">
+      <div class="pile" style="flex:1;gap:6px">
+        <div class="pad" id="pad1"><div class="niveau"></div><span>pad 1</span></div>
+        <label class="ligne petit"><input type="checkbox" id="maintien1"> maintenir</label>
+      </div>
+      <div class="pile" style="flex:1;gap:6px">
+        <div class="pad" id="pad2"><div class="niveau"></div><span>pad 2</span></div>
+        <label class="ligne petit"><input type="checkbox" id="maintien2"> maintenir</label>
+      </div>
+    </div>
+    <div class="valeur" style="margin-top:6px">appuyer : la hauteur du doigt donne la pression (stylet : sa pression) ; « maintenir » garde la pression au relâchement, pour jouer le joystick, le slider ou la pédale</div>
+  </section>
+
+  <section>
+    <h2>Joystick, slider, pédale</h2>
+    <div class="joy">
+      <div class="zone-joy" id="joy"><div class="manche" id="manche"></div></div>
+      <div class="pile" style="flex:1">
+        <div class="ligne">
+          <button id="joy-bouton">bouton du joystick</button>
+          <label class="ligne petit"><input type="checkbox" id="maintien-joy"> maintenir</label>
+        </div>
+        <label class="petit">rotation (z) <input type="range" id="joyz" min="0" max="127" value="64"></label>
+        <label class="petit">slider <input type="range" id="slider" min="0" max="127" value="0"></label>
+        <label class="petit">pédale <input type="range" id="pedale" min="0" max="127" value="0"></label>
+        <div class="valeur" id="joy-valeur">x 64 · y 64 · z 64</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>État de Pd</h2>
+    <dl class="etat">
+      <dt>contexte</dt><dd id="e-contexte">—</dd>
+      <dt>mode</dt><dd id="e-mode">—</dd>
+      <dt>transport</dt><dd id="e-transport">—</dd>
+      <dt>fichier</dt><dd id="e-fichier">—</dd>
+      <dt>édition</dt><dd id="e-edition">—</dd>
+    </dl>
+    <ol class="menu" id="menu"></ol>
+  </section>
+
+  <section>
+    <h2>Voix (tap)</h2>
+    <dl class="etat">
+      <dt>note</dt><dd id="v-note">—</dd>
+      <dt>bend</dt><dd id="v-bend">—</dd>
+    </dl>
+    <div style="margin:8px 0 2px" class="petit">vélocité</div>
+    <div class="barre"><i id="v-vel"></i></div>
+    <table style="margin-top:10px"><tbody id="v-cc"></tbody></table>
+  </section>
+
+  <section>
+    <h2>Réglages</h2>
+    <div class="pile">
+      <div class="ligne">
+        <label class="petit">sirène</label>
+        <select id="sirene"></select>
+        <label class="ligne petit"><input type="checkbox" id="frette"> fretté</label>
+      </div>
+      <div class="ligne">
+        <label class="petit">mode</label>
+        <div class="segments"><button data-mode="restreint">restreint</button><button data-mode="admin">admin</button></div>
+      </div>
+      <div class="ligne">
+        <label class="petit">contexte</label>
+        <div class="segments" id="contextes"></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Partition</h2>
+    <div class="pile">
+      <div class="ligne">
+        <input type="text" id="filtre" placeholder="filtrer les pièces…" aria-label="filtrer">
+        <span class="valeur" id="nb-fichiers"></span>
+      </div>
+      <div class="fichiers" id="fichiers"></div>
+      <div class="ligne">
+        <button data-transport="lecture">Lecture</button>
+        <button data-transport="pause">Pause</button>
+        <button data-transport="stop">Stop</button>
+        <label class="petit">anticipation (ms)</label>
+        <input type="number" id="anticipation" value="0" min="0" step="500" style="width:90px">
+      </div>
+    </div>
+  </section>
+
+  <section style="grid-column: 1 / -1">
+    <h2>Fonctions : qui joue, et avec quel contrôleur</h2>
+    <table>
+      <thead><tr><th>fonction</th><th>joué par</th><th>source</th><th>source 2</th></tr></thead>
+      <tbody id="fonctions"></tbody>
+    </table>
+  </section>
+
+  <section style="grid-column: 1 / -1">
+    <h2>Journal</h2>
+    <div id="journal"></div>
+  </section>
+</main>
+<div id="toast"></div>
+
+<script type="module" src="simulateur-fable/App.js"></script>
+</body>
+</html>

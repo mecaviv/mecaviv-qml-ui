@@ -127,6 +127,10 @@ build_web() {
     # Copier les fichiers dans webfiles
     print_info "Copie des fichiers WebAssembly..."
     cp build/appSirenePupitre.* webfiles/
+
+    # Fable: simulateur.html (simulateur-fable/App.js)
+    print_info "Fable: simulateur-fable…"
+    (cd ../.. && dotnet tool restore && dotnet fable SirenePupitre/webfiles/simulateur-fable -o SirenePupitre/webfiles)
     
     # FIX : Corriger l'ordre des scripts dans le HTML
     # Qt génère le HTML avec appSirenePupitre.js avant qtloader.js, ce qui cause "qtLoad is not defined"

@@ -61,6 +61,16 @@ build_qt_project() {
     echo "✅ Build de $project_name terminé"
 }
 
+# Fable: the F# browser side of a page (e.g. SirenePupitre simulateur)
+build_fable() {
+    local name=$1
+    echo "🧪 Fable: $name…"
+    cd "$ROOT_DIR"
+    dotnet tool restore
+    dotnet fable "SirenePupitre/webfiles/$name" -o SirenePupitre/webfiles
+    echo "✅ Fable: $name"
+}
+
 # Fonction de build pour pedalierSirenium (structure différente)
 build_pedalier() {
     local project_dir="$ROOT_DIR/pedalierSirenium/QtFiles"
@@ -94,6 +104,7 @@ build_pedalier() {
 case $PROJECT in
     sirenepupitre)
         build_qt_project "SirenePupitre" "$ROOT_DIR/SirenePupitre"
+        build_fable "simulateur-fable"
         ;;
     
     sirenconsole)
